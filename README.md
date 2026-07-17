@@ -3,6 +3,11 @@
 
 ## 課程範例
 * [ag-course-index](https://github.com/drgarbage/ag-course-index) : 課程程式索引
+* **ag-course-chat** : 手寫範例
+  * [ag-course-chat-step00](https://github.com/drgarbage/ag-course-chat-step00)
+  * [ag-course-chat-step01](https://github.com/drgarbage/ag-course-chat-step01)
+  * [ag-course-chat-step02](https://github.com/drgarbage/ag-course-chat-step02)
+
 * [ag-course-web-agent-base](https://github.com/drgarbage/ag-course-web-agent-base) : 空白的 Web Agent 基底
 * ag-course-line-chatbot-base : 空白的 Line Agent 基底
 * ag-course-line-secretary : LINE AI 秘書
