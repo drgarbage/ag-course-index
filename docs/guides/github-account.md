@@ -11,13 +11,6 @@ GitHub 用來存放與協作開發程式碼。課程範例多數也會從 GitHub
 5. 開啟 GitHub 寄出的信件並驗證電子郵件。未驗證信箱會限制建立儲存庫等功能。
 6. 初學者可先使用免費方案；需要時再升級即可。
 
-## 註冊後建議
-
-1. 到 **Settings → Password and authentication** 啟用雙因素驗證（2FA）。
-2. 保存復原碼，避免遺失驗證裝置後無法登入。
-3. 到 **Settings → Emails** 檢查提交紀錄要使用的信箱及隱私設定。
-4. 完成 [GitHub Hello World](https://docs.github.com/zh/get-started/start-your-journey/hello-world)，熟悉儲存庫、分支、提交與 Pull Request。
-
 ## 常見問題
 
 - **收不到驗證信？** 檢查垃圾郵件，確認信箱拼字，再從設定頁重新寄送。
