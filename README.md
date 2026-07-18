@@ -1,6 +1,10 @@
 # Gemini 課程範例
 本專案存放 Gemini 實戰課程相關範例連結
 
+## 下載連結
+* Antigravity [Windows](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/windows-x64/Antigravity-x64.exe) | [macOS](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/darwin-arm/Antigravity.dmg)
+* Antigravity IDE [Windows](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/windows-x64/Antigravity%20IDE.exe) | [macOS](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/darwin-arm/Antigravity%20IDE.dmg)
+
 ## 課程簡報
 * [01 - AI Agent與Gemini](https://drive.google.com/file/d/1tj3D4CABs7zXA292MLywNsZUf2JphaPF/view?usp=drive_link)
 * [02 - 利用Antigravity製作第一個AI助理](https://drive.google.com/file/d/1xLdbsKc430BSsqyRZ5gGVJLK0M4LSe4U/view?usp=drive_link)
