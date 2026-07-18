@@ -36,3 +36,9 @@
 
 ## 其他資源
 * [postgres-northwind](https://github.com/drgarbage/postgres-northwind) : 北風資料庫
+
+## 安裝指引
+* [Google 帳號註冊指引](docs/guides/google-account.md)
+* [Antigravity 2.0 與 Antigravity IDE 安裝指引](docs/guides/antigravity.md)
+* [GitHub 帳號註冊指引](docs/guides/github-account.md)
+* [Visual Studio Code 安裝指引](docs/guides/visual-studio-code.md)
