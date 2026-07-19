@@ -172,3 +172,36 @@ Describe 'Optional Windows AI recovery flow' {
         $result.support_code | Should -Be 'SUP-LIMIT1'
     }
 }
+
+Describe 'Cross-platform acceptance matrix' {
+    It 'documents all sixteen unique scenarios without ditto placeholders' {
+        $matrixPath = Join-Path $PSScriptRoot 'acceptance-matrix.md'
+        $matrix = Get-Content $matrixPath
+        $scenarioIds = @($matrix | ForEach-Object {
+            if ($_ -match '^\|\s*(\d+)\s*\|') { [int]$Matches[1] }
+        })
+        $scenarioIds | Should -Be (1..16)
+        ($matrix -join "`n") | Should -Not -Match '同上|ditto'
+    }
+
+    It 'maps Windows scenario actions to the fixed dispatcher' -ForEach @(
+        @{ Scenario = 1; Action = 'INSTALL_GIT_WINDOWS'; Confirmation = $true }
+        @{ Scenario = 2; Action = 'INSTALL_GH_WINDOWS'; Confirmation = $true }
+        @{ Scenario = 3; Action = 'GH_AUTH_SETUP_GIT'; Confirmation = $true }
+        @{ Scenario = 4; Action = 'GH_AUTH_LOGIN_WEB'; Confirmation = $true }
+        @{ Scenario = 5; Action = 'REFRESH_WINDOWS_PATH'; Confirmation = $true }
+        @{ Scenario = 9; Action = 'CHECK_RAW_GITHUB_NETWORK'; Confirmation = $false }
+        @{ Scenario = 10; Action = 'GH_AUTH_SWITCH'; Confirmation = $true }
+        @{ Scenario = 11; Action = 'CLEAR_STALE_GITHUB_CREDENTIAL_WINDOWS'; Confirmation = $true }
+        @{ Scenario = 13; Action = 'CHECK_GH_AUTH_STATUS'; Confirmation = $false }
+    ) {
+        $script:acceptanceCalls = 0
+        $result = Invoke-AllowlistedInstallAction -ActionId $Action -Confirmed:$Confirmation -CommandRunner {
+            param($command, $arguments)
+            $script:acceptanceCalls++
+            @{ exit_code = 0; stdout = ''; stderr = '' }
+        }
+        $result.action_id | Should -Be $Action
+        if ($Action -notin @('REFRESH_WINDOWS_PATH')) { $script:acceptanceCalls | Should -Be 1 }
+    }
+}

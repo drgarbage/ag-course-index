@@ -126,3 +126,33 @@ STUB
   [ "$(wc -l < "$INSTALL_SUPPORT_DIAGNOSIS_LOG" | tr -d ' ')" -eq 15 ]
   [[ "$output" == *'SUP-LIMIT2'* ]]
 }
+
+@test "acceptance matrix documents sixteen unique scenarios" {
+  matrix="$BATS_TEST_DIRNAME/acceptance-matrix.md"
+  [ -f "$matrix" ]
+  [ "$(awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/{count++} END{print count+0}' "$matrix")" -eq 16 ]
+  run grep -Eiq '同上|ditto' "$matrix"
+  [ "$status" -eq 1 ]
+}
+
+@test "macOS acceptance actions use only the fixed dispatcher" {
+  install_support_run_command() {
+    printf '%s %s\n' "$1" "$2" >> "$INSTALL_SUPPORT_COMMAND_LOG"
+  }
+  install_support_install_gh() {
+    printf '__install_gh__\n' >> "$INSTALL_SUPPORT_COMMAND_LOG"
+  }
+  export -f install_support_run_command install_support_install_gh
+  export INSTALL_SUPPORT_COMMAND_LOG="$BATS_TEST_TMPDIR/acceptance-commands.log"
+
+  run_allowlisted_action INSTALL_XCODE_TOOLS_MACOS yes
+  run_allowlisted_action INSTALL_GH_MACOS yes
+  run_allowlisted_action GH_AUTH_SETUP_GIT yes
+  run_allowlisted_action GH_AUTH_LOGIN_WEB yes
+  run_allowlisted_action CHECK_RAW_GITHUB_NETWORK no
+  run_allowlisted_action GH_AUTH_SWITCH yes
+
+  [ "$(wc -l < "$INSTALL_SUPPORT_COMMAND_LOG" | tr -d ' ')" -eq 6 ]
+  run run_allowlisted_action CLEAR_STALE_GITHUB_CREDENTIAL_MACOS no
+  [ "$status" -eq 2 ]
+}
