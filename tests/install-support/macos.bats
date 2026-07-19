@@ -115,6 +115,26 @@ STUB
   [ "$status" -eq 1 ]
 }
 
+@test "localized backend contract fields are displayed" {
+  export FAKE_LOCAL_RESULT='{"matched":false}'
+  export FAKE_CONSENT=yes
+  export FAKE_SESSION='{"session_id":"is_fake","session_token":"signed-fake"}'
+  export FAKE_DIAGNOSIS='{"summary_zh_tw":"繁中摘要","explanation_zh_tw":"繁中說明","action":{"id":"CONTACT_INSTRUCTOR","title_zh_tw":"聯絡講師","impact_zh_tw":"提供支援碼","requires_confirmation":false},"resolved":false,"support_code":"SUP-CONTRACT"}'
+  export INSTALL_SUPPORT_PREVIOUS_LOG="$BATS_TEST_TMPDIR/previous.json"
+  run handle_install_failure network '{}' fake_local_provider fake_consent_provider fake_session_provider fake_diagnosis_provider
+  [ "$status" -eq 6 ]
+  [[ "$output" == *'繁中摘要'* ]]
+  [[ "$output" == *'繁中說明'* ]]
+  [[ "$output" == *'聯絡講師'* ]]
+  [[ "$output" == *'提供支援碼'* ]]
+}
+
+@test "stale credential action never deletes a keychain item automatically" {
+  run awk '/CLEAR_STALE_GITHUB_CREDENTIAL_MACOS\)/{print; exit}' "$INSTALLER"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'security delete-'* ]]
+}
+
 @test "offline API keeps the static fallback" {
   install_support_consent() { printf 'yes'; }
   new_install_support_session() { return 7; }

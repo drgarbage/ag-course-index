@@ -3,7 +3,6 @@
   "patterns": [
     {"pattern_key":"windows.git_missing.v1","platform":"windows","step":"git_install","all":{"git_found":false,"winget_available":true},"action_id":"INSTALL_GIT_WINDOWS","risk":"medium","requires_confirmation":true,"summary_zh_tw":"尚未安裝 Git。"},
     {"pattern_key":"windows.gh_missing.v1","platform":"windows","step":"gh_install","all":{"gh_found":false,"winget_available":true},"action_id":"INSTALL_GH_WINDOWS","risk":"medium","requires_confirmation":true,"summary_zh_tw":"尚未安裝 GitHub CLI。"},
-    {"pattern_key":"windows.winget_missing.v1","platform":"windows","step":"git_install","all":{"winget_available":false},"action_id":"CONTACT_INSTRUCTOR","risk":"read_only","requires_confirmation":false,"summary_zh_tw":"目前找不到 WinGet。"},
     {"pattern_key":"windows.path_stale.v1","platform":"windows","step":"path","all":{"git_found":false},"action_id":"REFRESH_WINDOWS_PATH","risk":"low","requires_confirmation":true,"summary_zh_tw":"目前終端機尚未載入新的 PATH。"},
     {"pattern_key":"windows.auth_missing.v1","platform":"windows","step":"github_auth","all":{"github_auth_state":"not_logged_in"},"action_id":"GH_AUTH_LOGIN_WEB","risk":"medium","requires_confirmation":true,"summary_zh_tw":"GitHub CLI 尚未登入。"},
     {"pattern_key":"windows.credential_helper_missing.v1","platform":"windows","step":"credential_helper","all":{"credential_helper_state":"missing"},"action_id":"GH_AUTH_SETUP_GIT","risk":"low","requires_confirmation":true,"summary_zh_tw":"Git credential helper 尚未設定。"},

@@ -41,16 +41,26 @@ collect_install_diagnostics() {
   local last_error="${2:-}"
   local safe_error
   safe_error="$(printf '%s' "$last_error" | sed -E 's#/Users/[^/[:space:]]+#/Users/<USER>#g' | cut -c 1-4000)"
-  local git_found=false gh_found=false xcode_tools_found=false
+  local git_found=false gh_found=false xcode_tools_available=false local_bin_in_path=false
+  local github_auth_state=unknown credential_helper_state=unknown
   has_command git && git_found=true
   has_command gh && gh_found=true
-  xcode-select -p >/dev/null 2>&1 && xcode_tools_found=true
+  xcode-select -p >/dev/null 2>&1 && xcode_tools_available=true
+  case ":$PATH:" in *":$HOME/.local/bin:"*) local_bin_in_path=true ;; esac
+  if [ "$support_step" = github_auth ] && [ "$gh_found" = true ]; then
+    if gh auth status --hostname github.com >/dev/null 2>&1; then github_auth_state=authenticated; else github_auth_state=not_logged_in; fi
+  fi
+  if [ "$support_step" = credential_helper ] && [ "$git_found" = true ]; then
+    if git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' >/dev/null 2>&1; then credential_helper_state=configured; else credential_helper_state=missing; fi
+  fi
   python3 -c 'import json,sys; print(json.dumps({
     "platform":"macos", "step":sys.argv[1],
     "git_found":sys.argv[2] == "true", "gh_found":sys.argv[3] == "true",
-    "xcode_tools_found":sys.argv[4] == "true", "stderr":sys.argv[5]
+    "xcode_tools_available":sys.argv[4] == "true", "local_bin_in_path":sys.argv[5] == "true",
+    "github_auth_state":sys.argv[6], "credential_helper_state":sys.argv[7], "stderr":sys.argv[8]
   }, separators=(",", ":")))' \
-    "$support_step" "$git_found" "$gh_found" "$xcode_tools_found" "$safe_error"
+    "$support_step" "$git_found" "$gh_found" "$xcode_tools_available" "$local_bin_in_path" \
+    "$github_auth_state" "$credential_helper_state" "$safe_error"
 }
 
 new_install_support_session() {
@@ -119,7 +129,7 @@ run_allowlisted_action() {
     GH_AUTH_LOGIN_WEB) requires_confirmation=true; set -- gh auth login --hostname github.com --git-protocol https --web ;;
     GH_AUTH_SETUP_GIT) requires_confirmation=true; set -- gh auth setup-git --hostname github.com ;;
     GH_AUTH_SWITCH) requires_confirmation=true; set -- gh auth switch --hostname github.com ;;
-    CLEAR_STALE_GITHUB_CREDENTIAL_MACOS) requires_confirmation=true; set -- security delete-internet-password -s github.com ;;
+    CLEAR_STALE_GITHUB_CREDENTIAL_MACOS) requires_confirmation=true; set -- open -a 'Keychain Access' ;;
     RESTART_TERMINAL_REQUIRED) requires_confirmation=true; set -- __no_op__ ;;
     *) printf 'Unknown install support action: %s\n' "$action_id" >&2; return 64 ;;
   esac
@@ -214,8 +224,8 @@ r=json.loads(sys.argv[1]); print(json.dumps({k:r[k] for k in ("local_pattern_key
       return 4
     fi
     support_code="$(json_field "$diagnosis" support_code)"
-    [ -n "$(json_field "$diagnosis" summary)" ] && printf '%s\n' "$(json_field "$diagnosis" summary)"
-    [ -n "$(json_field "$diagnosis" explanation)" ] && printf '%s\n' "$(json_field "$diagnosis" explanation)"
+    [ -n "$(json_field "$diagnosis" summary_zh_tw)" ] && printf '%s\n' "$(json_field "$diagnosis" summary_zh_tw)"
+    [ -n "$(json_field "$diagnosis" explanation_zh_tw)" ] && printf '%s\n' "$(json_field "$diagnosis" explanation_zh_tw)"
     [ "$(json_field "$diagnosis" resolved)" = true ] && return 0
 
     action_id="$(json_path "$diagnosis" action.id)"
@@ -223,6 +233,8 @@ r=json.loads(sys.argv[1]); print(json.dumps({k:r[k] for k in ("local_pattern_key
       printf 'AI 診斷回應格式錯誤；原本的靜態排錯說明仍然有效。\n'
       return 4
     }
+    [ -n "$(json_path "$diagnosis" action.title_zh_tw)" ] && printf '%s\n' "$(json_path "$diagnosis" action.title_zh_tw)"
+    [ -n "$(json_path "$diagnosis" action.impact_zh_tw)" ] && printf '%s\n' "$(json_path "$diagnosis" action.impact_zh_tw)"
     [ "$action_id" = CONTACT_INSTRUCTOR ] && {
       printf '請將支援碼 %s 提供給講師。\n' "$support_code"
       return 6
@@ -255,7 +267,7 @@ else
   printf '  請在系統視窗按「安裝」，等待安裝完成後回到這裡。\n'
   read -r -p "完成後按 Enter 繼續："
   if ! xcode-select -p >/dev/null 2>&1 || ! has_command git; then
-    fail "仍找不到 Git。" "到「系統設定 → 一般 → 軟體更新」完成 Command Line Tools 更新，重新開機後再執行本程式。"
+    fail "仍找不到 Git。" "到「系統設定 → 一般 → 軟體更新」完成 Command Line Tools 更新，重新開機後再執行本程式。" xcode_tools
   fi
   ok "安裝完成：$(git --version)"
 fi
@@ -265,34 +277,34 @@ LOCAL_BIN="$HOME/.local/bin"
 if has_command gh; then
   ok "已安裝：$(gh --version | head -n 1)"
 else
-  has_command curl || fail "找不到 curl，無法下載 GitHub CLI。" "先完成 macOS 系統更新，再重新執行本程式。"
-  has_command unzip || fail "找不到 unzip，無法解壓縮 GitHub CLI。" "先完成 macOS 系統更新，再重新執行本程式。"
+  has_command curl || fail "找不到 curl，無法下載 GitHub CLI。" "先完成 macOS 系統更新，再重新執行本程式。" gh_install
+  has_command unzip || fail "找不到 unzip，無法解壓縮 GitHub CLI。" "先完成 macOS 系統更新，再重新執行本程式。" gh_install
   case "$(uname -m)" in
     arm64) GH_ARCH="arm64" ;;
     x86_64) GH_ARCH="amd64" ;;
-    *) fail "不支援的處理器架構：$(uname -m)" "請從 https://cli.github.com/ 依官方說明手動安裝。" ;;
+    *) fail "不支援的處理器架構：$(uname -m)" "請從 https://cli.github.com/ 依官方說明手動安裝。" gh_install ;;
   esac
   printf '  正在查詢 GitHub 官方最新版本並下載，請稍候。\n'
   RELEASE_JSON="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest)" || \
-    fail "無法連線到 GitHub API。" "確認網路、VPN、防火牆或學校代理伺服器設定後重試。"
+    fail "無法連線到 GitHub API。" "確認網路、VPN、防火牆或學校代理伺服器設定後重試。" network
   GH_URL="$(printf '%s' "$RELEASE_JSON" | sed -nE 's/.*"browser_download_url": "([^"]*_macOS_'"$GH_ARCH"'\.zip)".*/\1/p' | head -n 1)"
-  [ -n "$GH_URL" ] || fail "找不到適合這台 Mac 的 GitHub CLI 安裝檔。" "GitHub 的套件格式可能已變更，請從 https://cli.github.com/ 手動安裝並通知講師更新腳本。"
-  TMP_DIR="$(mktemp -d)" || fail "無法建立暫存資料夾。" "確認磁碟空間與使用者權限後重試。"
+  [ -n "$GH_URL" ] || fail "找不到適合這台 Mac 的 GitHub CLI 安裝檔。" "GitHub 的套件格式可能已變更，請從 https://cli.github.com/ 手動安裝並通知講師更新腳本。" gh_install
+  TMP_DIR="$(mktemp -d)" || fail "無法建立暫存資料夾。" "確認磁碟空間與使用者權限後重試。" gh_install
   trap 'rm -rf "$TMP_DIR"' EXIT
-  curl -fL "$GH_URL" -o "$TMP_DIR/gh.zip" || fail "GitHub CLI 下載失敗。" "確認網路連線後重試。"
-  unzip -q "$TMP_DIR/gh.zip" -d "$TMP_DIR/unpacked" || fail "GitHub CLI 解壓縮失敗。" "刪除下載檔並重新執行本程式。"
+  curl -fL "$GH_URL" -o "$TMP_DIR/gh.zip" || fail "GitHub CLI 下載失敗。" "確認網路連線後重試。" network
+  unzip -q "$TMP_DIR/gh.zip" -d "$TMP_DIR/unpacked" || fail "GitHub CLI 解壓縮失敗。" "刪除下載檔並重新執行本程式。" gh_install
   GH_BINARY="$(find "$TMP_DIR/unpacked" -type f -path '*/bin/gh' -print -quit)"
-  [ -n "$GH_BINARY" ] || fail "下載內容中找不到 gh。" "請從 https://cli.github.com/ 手動安裝並通知講師。"
-  mkdir -p "$LOCAL_BIN" || fail "無法建立 $LOCAL_BIN。" "確認個人資料夾權限後重試。"
+  [ -n "$GH_BINARY" ] || fail "下載內容中找不到 gh。" "請從 https://cli.github.com/ 手動安裝並通知講師。" gh_install
+  mkdir -p "$LOCAL_BIN" || fail "無法建立 $LOCAL_BIN。" "確認個人資料夾權限後重試。" path
   cp "$GH_BINARY" "$LOCAL_BIN/gh" && chmod 755 "$LOCAL_BIN/gh" || \
-    fail "無法將 gh 安裝到 $LOCAL_BIN。" "確認個人資料夾權限與磁碟空間後重試。"
+    fail "無法將 gh 安裝到 $LOCAL_BIN。" "確認個人資料夾權限與磁碟空間後重試。" path
   export PATH="$LOCAL_BIN:$PATH"
   PROFILE_FILE="$HOME/.zprofile"
   PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
   if ! grep -Fq "$PATH_LINE" "$PROFILE_FILE" 2>/dev/null; then
-    printf '\n%s\n' "$PATH_LINE" >> "$PROFILE_FILE" || fail "無法更新 $PROFILE_FILE。" "請手動將 $LOCAL_BIN 加入 PATH。"
+    printf '\n%s\n' "$PATH_LINE" >> "$PROFILE_FILE" || fail "無法更新 $PROFILE_FILE。" "請手動將 $LOCAL_BIN 加入 PATH。" path
   fi
-  has_command gh || fail "GitHub CLI 已下載，但目前仍找不到 gh。" "關閉終端機、重新開啟後再執行本程式。"
+  has_command gh || fail "GitHub CLI 已下載，但目前仍找不到 gh。" "關閉終端機、重新開啟後再執行本程式。" path
   ok "安裝完成：$(gh --version | head -n 1)"
 fi
 
@@ -352,13 +364,13 @@ else
   done
 
   [ "$LOGGED_IN" -eq 1 ] || \
-    fail "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱）。若鑰匙圈一直詢問密碼，請開啟「鑰匙圈存取」確認登入鑰匙圈已解鎖，再重新執行本程式。"
+    fail "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱）。若鑰匙圈一直詢問密碼，請開啟「鑰匙圈存取」確認登入鑰匙圈已解鎖，再重新執行本程式。" github_auth
 fi
 
 step "讓 Git 使用 GitHub CLI 保存 HTTPS 憑證"
-gh config set git_protocol https --host github.com || fail "無法設定 HTTPS。" "執行 gh auth status 確認登入狀態。"
+gh config set git_protocol https --host github.com || fail "無法設定 HTTPS。" "執行 gh auth status 確認登入狀態。" credential_helper
 gh auth setup-git --hostname github.com || \
-  fail "無法設定 Git credential helper。" "執行 gh auth status，再執行 gh auth setup-git。若仍失敗，檢查「鑰匙圈存取」中的舊 GitHub 項目。"
+  fail "無法設定 Git credential helper。" "執行 gh auth status，再執行 gh auth setup-git。若仍失敗，檢查「鑰匙圈存取」中的舊 GitHub 項目。" credential_helper
 ok "Git 不應再於每次 pull／push 時重複要求登入"
 
 step "最終驗證"
@@ -368,7 +380,7 @@ has_command gh || { warn "找不到 GitHub CLI"; FAILED=1; }
 gh auth status --hostname github.com >/dev/null 2>&1 || { warn "GitHub 授權驗證失敗"; FAILED=1; }
 HELPER="$(git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>/dev/null || true)"
 [ -n "$HELPER" ] || { warn "找不到 Git 憑證助手設定"; FAILED=1; }
-[ "$FAILED" -eq 0 ] || fail "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。"
+[ "$FAILED" -eq 0 ] || fail "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。" credential_helper
 
 printf '\n\033[32m所有必要設定皆已完成。\033[0m\n'
 printf 'Git：%s\n' "$(git --version)"

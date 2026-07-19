@@ -176,6 +176,50 @@ Describe 'Optional Windows AI recovery flow' {
         $result.status | Should -Be 'limit'
         $result.support_code | Should -Be 'SUP-LIMIT1'
     }
+
+    It 'uses local confirmation policy even when the response says false' {
+        $script:unsafeActionCalls = 0
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'gh_install' -Diagnostics @{} `
+            -ConsentProvider { 'y' } -ConfirmationProvider { 'n' } `
+            -LocalPatternProvider { $null } `
+            -SessionFactory { @{ session_id = 'is_fake'; session_token = 'signed-fake' } } `
+            -DiagnosisProvider { @{ action = @{ id = 'INSTALL_GH_WINDOWS'; requires_confirmation = $false }; resolved = $false; support_code = 'SUP-SAFE01' } } `
+            -ActionRunner { $script:unsafeActionCalls++; @{ action_id = 'INSTALL_GH_WINDOWS'; exit_code = 0 } }
+        $result.status | Should -Be 'action_declined'
+        $script:unsafeActionCalls | Should -Be 0
+    }
+
+    It 'renders exact localized backend contract fields before confirmation' {
+        $script:messages = [System.Collections.Generic.List[string]]::new()
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'github_auth' -Diagnostics @{} `
+            -ConsentProvider { 'y' } -ConfirmationProvider { 'n' } `
+            -LocalPatternProvider { $null } `
+            -SessionFactory { @{ session_id = 'is_fake'; session_token = 'signed-fake' } } `
+            -DiagnosisProvider { @{
+                summary_zh_tw = '繁中摘要'; explanation_zh_tw = '繁中說明'
+                action = @{ id = 'GH_AUTH_LOGIN_WEB'; title_zh_tw = '登入 GitHub'; impact_zh_tw = '會開啟瀏覽器'; requires_confirmation = $true }
+                resolved = $false; support_code = 'SUP-CONTRACT'
+            } } `
+            -OutputWriter { param($message) $script:messages.Add($message) }
+        $script:messages | Should -Be @('繁中摘要', '繁中說明', '登入 GitHub', '會開啟瀏覽器')
+        $result.status | Should -Be 'action_declined'
+    }
+
+    It 'falls back on non-boolean resolved values' {
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'network' -Diagnostics @{} -ConsentProvider { 'y' } `
+            -LocalPatternProvider { $null } `
+            -SessionFactory { @{ session_id = 'is_fake'; session_token = 'signed-fake' } } `
+            -DiagnosisProvider { @{ action = @{ id = 'CONTACT_INSTRUCTOR'; requires_confirmation = $false }; resolved = 'false' } }
+        $result.status | Should -Be 'fallback'
+    }
+
+    It 'treats local recovery as successful in the static failure handler' {
+        $source = Get-Content $script:InstallerPath -Raw
+        $source | Should -Match "status -in @\('resolved', 'local_resolved'\)"
+    }
 }
 
 Describe 'Cross-platform acceptance matrix' {

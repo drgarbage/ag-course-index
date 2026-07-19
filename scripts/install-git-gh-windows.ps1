@@ -39,6 +39,14 @@ function Get-InstallDiagnostics {
         git_found = [bool](& $CommandLookup "git")
         gh_found = [bool](& $CommandLookup "gh")
         winget_available = [bool](& $CommandLookup "winget")
+        github_auth_state = if ($Step -eq 'github_auth' -and (& $CommandLookup "gh")) {
+            & gh auth status --hostname github.com *> $null
+            if ($LASTEXITCODE -eq 0) { 'authenticated' } else { 'not_logged_in' }
+        } else { 'unknown' }
+        credential_helper_state = if ($Step -eq 'credential_helper' -and (& $CommandLookup "git")) {
+            $configuredHelper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
+            if ($configuredHelper) { 'configured' } else { 'missing' }
+        } else { 'unknown' }
         stderr = $safeError
     }
 }
@@ -156,6 +164,23 @@ function Invoke-AllowlistedInstallAction {
     }
 }
 
+function Test-WindowsActionRequiresConfirmation {
+    param([Parameter(Mandatory)][string]$ActionId)
+    $stateChangingActions = @(
+        'REFRESH_WINDOWS_PATH', 'INSTALL_GIT_WINDOWS', 'INSTALL_GH_WINDOWS',
+        'GH_AUTH_LOGIN_WEB', 'GH_AUTH_SETUP_GIT', 'GH_AUTH_SWITCH',
+        'CLEAR_STALE_GITHUB_CREDENTIAL_WINDOWS', 'RESTART_TERMINAL_REQUIRED'
+    )
+    if ($ActionId -in $stateChangingActions) { return $true }
+    $readOnlyActions = @(
+        'CHECK_GIT_VERSION', 'CHECK_GH_VERSION', 'CHECK_WINGET_VERSION',
+        'CHECK_GITHUB_NETWORK', 'CHECK_RAW_GITHUB_NETWORK', 'CHECK_GH_AUTH_STATUS',
+        'CHECK_GIT_CREDENTIAL_HELPER', 'OPEN_WINDOWS_CREDENTIAL_MANAGER', 'CONTACT_INSTRUCTOR'
+    )
+    if ($ActionId -in $readOnlyActions) { return $false }
+    throw "Unknown install support action: $ActionId"
+}
+
 function Invoke-LocalInstallPattern {
     param(
         [Parameter(Mandatory)][string]$Step,
@@ -263,8 +288,11 @@ function Invoke-OptionalInstallSupport {
         for ($attempt = 1; $attempt -le 15; $attempt++) {
             $diagnosis = & $DiagnosisProvider $session $Step $attempt $Diagnostics $previousAction
             if ($diagnosis.support_code) { $supportCode = $diagnosis.support_code }
-            if ($diagnosis.summary) { & $OutputWriter ([string]$diagnosis.summary) }
-            if ($diagnosis.explanation) { & $OutputWriter ([string]$diagnosis.explanation) }
+            if ($diagnosis.resolved -isnot [bool]) {
+                return [pscustomobject]@{ status = 'fallback'; support_code = $supportCode }
+            }
+            if ($diagnosis.summary_zh_tw) { & $OutputWriter ([string]$diagnosis.summary_zh_tw) }
+            if ($diagnosis.explanation_zh_tw) { & $OutputWriter ([string]$diagnosis.explanation_zh_tw) }
             if ($diagnosis.resolved) {
                 return [pscustomobject]@{ status = 'resolved'; support_code = $supportCode }
             }
@@ -273,14 +301,15 @@ function Invoke-OptionalInstallSupport {
             if (-not $action -or -not $action.id) {
                 return [pscustomobject]@{ status = 'fallback'; support_code = $supportCode }
             }
-            if ($action.title) { & $OutputWriter ([string]$action.title) }
-            if ($action.impact) { & $OutputWriter ([string]$action.impact) }
+            if ($action.title_zh_tw) { & $OutputWriter ([string]$action.title_zh_tw) }
+            if ($action.impact_zh_tw) { & $OutputWriter ([string]$action.impact_zh_tw) }
             if ($action.id -eq 'CONTACT_INSTRUCTOR') {
                 return [pscustomobject]@{ status = 'contact'; support_code = $supportCode }
             }
 
-            $confirmed = $true
-            if ($action.requires_confirmation) {
+            $requiresConfirmation = Test-WindowsActionRequiresConfirmation ([string]$action.id)
+            $confirmed = -not $requiresConfirmation
+            if ($requiresConfirmation) {
                 $confirmed = ((& $ConfirmationProvider) -match '^(?i:y|yes)$')
                 if (-not $confirmed) {
                     return [pscustomobject]@{ status = 'action_declined'; support_code = $supportCode }
@@ -295,7 +324,7 @@ function Invoke-OptionalInstallSupport {
         }
         [pscustomobject]@{ status = 'limit'; support_code = $supportCode }
     } catch {
-        [pscustomobject]@{ status = 'fallback'; support_code = $null }
+        [pscustomobject]@{ status = 'fallback'; support_code = $supportCode }
     }
 }
 
@@ -311,7 +340,7 @@ function Stop-Zh(
     Write-Host "建議處理方式：$Suggestion" -ForegroundColor Yellow
     $diagnostics = Get-InstallDiagnostics -Step $Step -LastError $Message
     $recovery = Invoke-OptionalInstallSupport -Step $Step -Diagnostics $diagnostics
-    if ($recovery.status -eq 'resolved') {
+    if ($recovery.status -in @('resolved', 'local_resolved')) {
         Write-Ok 'AI 安裝助理已完成排錯。'
         exit 0
     }
@@ -335,7 +364,7 @@ Write-Host "程式只會安裝官方套件、設定 Git，並開啟 GitHub 官�
 
 Write-Step "檢查 WinGet"
 if (-not (Has-Command "winget")) {
-    Stop-Zh "找不到 WinGet。" "開啟 Microsoft Store，安裝或更新『應用程式安裝程式（App Installer）』，重新開機後再執行本程式。"
+    Stop-Zh "找不到 WinGet。" "開啟 Microsoft Store，安裝或更新『應用程式安裝程式（App Installer）』，重新開機後再執行本程式。" 'git_install'
 }
 Write-Ok "WinGet 可使用"
 
@@ -348,11 +377,11 @@ if (Has-Command "git") {
         & winget install --id Git.Git --exact --source winget --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -ne 0) { throw "WinGet 結束代碼 $LASTEXITCODE" }
     } catch {
-        Stop-Zh "Git 安裝失敗：$($_.Exception.Message)" "確認網路連線、Windows Update 與 Microsoft Store 可用，再以系統管理員身分重新執行。"
+        Stop-Zh "Git 安裝失敗：$($_.Exception.Message)" "確認網路連線、Windows Update 與 Microsoft Store 可用，再以系統管理員身分重新執行。" 'git_install'
     }
     Refresh-Path
     if (-not (Has-Command "git")) {
-        Stop-Zh "Git 已執行安裝，但目前終端機仍找不到 git。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。"
+        Stop-Zh "Git 已執行安裝，但目前終端機仍找不到 git。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。" 'path'
     }
     Write-Ok "安裝完成：$(git --version)"
 }
@@ -365,11 +394,11 @@ if (Has-Command "gh") {
         & winget install --id GitHub.cli --exact --source winget --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -ne 0) { throw "WinGet 結束代碼 $LASTEXITCODE" }
     } catch {
-        Stop-Zh "GitHub CLI 安裝失敗：$($_.Exception.Message)" "確認網路連線後重新執行；也可從 https://cli.github.com/ 手動安裝。"
+        Stop-Zh "GitHub CLI 安裝失敗：$($_.Exception.Message)" "確認網路連線後重新執行；也可從 https://cli.github.com/ 手動安裝。" 'gh_install'
     }
     Refresh-Path
     if (-not (Has-Command "gh")) {
-        Stop-Zh "GitHub CLI 已執行安裝，但目前終端機仍找不到 gh。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。"
+        Stop-Zh "GitHub CLI 已執行安裝，但目前終端機仍找不到 gh。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。" 'path'
     }
     Write-Ok "安裝完成：$(gh --version | Select-Object -First 1)"
 }
@@ -430,7 +459,7 @@ if ($LASTEXITCODE -ne 0) {
     }
 
     if (-not $loggedIn) {
-        Stop-Zh "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱），再重新執行本程式。若有多個帳號，先執行 gh auth switch。"
+        Stop-Zh "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱），再重新執行本程式。若有多個帳號，先執行 gh auth switch。" 'github_auth'
     }
 } else {
     Write-Ok "GitHub CLI 已登入"
@@ -441,7 +470,7 @@ Write-Step "讓 Git 使用 GitHub CLI 保存 HTTPS 憑證"
 & gh config set git_protocol https --host github.com
 & gh auth setup-git --hostname github.com
 if ($LASTEXITCODE -ne 0) {
-    Stop-Zh "無法設定 Git credential helper。" "執行 gh auth status 確認登入，再執行 gh auth setup-git。若仍失敗，檢查 Windows 認證管理員中的舊 GitHub 項目。"
+    Stop-Zh "無法設定 Git credential helper。" "執行 gh auth status 確認登入，再執行 gh auth setup-git。若仍失敗，檢查 Windows 認證管理員中的舊 GitHub 項目。" 'credential_helper'
 }
 Write-Ok "Git 不應再於每次 pull／push 時重複要求登入"
 
@@ -454,7 +483,7 @@ if ($LASTEXITCODE -ne 0) { Write-WarnZh "GitHub 授權驗證失敗"; $failed = $
 $helper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
 if (-not $helper) { Write-WarnZh "找不到 Git 憑證助手設定"; $failed = $true }
 if ($failed) {
-    Stop-Zh "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。"
+    Stop-Zh "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。" 'credential_helper'
 }
 
 Write-Host "`n所有必要設定皆已完成。" -ForegroundColor Green
