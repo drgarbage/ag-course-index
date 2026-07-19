@@ -23,6 +23,11 @@ Describe 'Course toolchain profile planner' {
         { Get-CourseToolchainPlan -Profile 'evil' } | Should -Throw '*Unknown profile*'
     }
 
+    It 'rejects uppercase profile and selected GUI identifiers' {
+        { Get-CourseToolchainPlan -Profile 'BASE' } | Should -Throw '*Unknown profile*'
+        { Get-CourseToolchainPlan -Profile base -GuiTools @('VSCODE') } | Should -Throw '*Unknown GUI tool*'
+    }
+
     It 'catalog contains no executable fields' {
         Get-Content (Join-Path $PSScriptRoot '../../scripts/toolchain/catalog.json') -Raw |
             Should -Not -Match '(?i)command|executable|arguments|url|package_id'
@@ -42,6 +47,13 @@ Describe 'Course toolchain profile planner' {
 
         { Get-CourseToolchainCatalog -CatalogPath $path } |
             Should -Throw '*Unknown tool ID*'
+    }
+
+    It 'rejects an uppercase catalog tool ID' {
+        $path = Join-Path $TestDrive 'uppercase-tool.json'
+        Set-Content -Path $path -NoNewline -Value '{"schema_version":1,"node_lts_major":24,"profiles":{"base":["GIT_GH","node_lts"],"line":["git_gh","node_lts","cloudflared"],"data":["git_gh","node_lts","docker_desktop"],"full":["git_gh","node_lts","cloudflared","docker_desktop"]},"gui_tools":["antigravity","vscode","browser"]}'
+
+        { Get-CourseToolchainCatalog -CatalogPath $path } | Should -Throw '*Unknown tool ID*'
     }
 
     It 'rejects duplicate catalog tool IDs' {
@@ -93,6 +105,21 @@ Describe 'Course toolchain GUI and readiness report' {
     It 'marks a profile unready when one required tool fails' {
         (New-ToolchainReport -Profile line -Results @(@{ tool_id = 'cloudflared'; status = 'failed' })).ready |
             Should -BeFalse
+    }
+
+    It 'rejects uppercase report profiles and ignores uppercase result tool IDs' {
+        { New-ToolchainReport -Profile BASE -Results @() } | Should -Throw
+        $report = New-ToolchainReport -Profile base -Results @(
+            @{ tool_id = 'GIT_GH'; status = 'installed' },
+            @{ tool_id = 'node_lts'; status = 'installed' }
+        )
+
+        $report.tools.status | Should -Be @('failed', 'installed')
+    }
+
+    It 'rejects uppercase GUI installer identifiers' {
+        { Get-WindowsGuiToolDefinition -ToolId VSCODE } | Should -Throw '*Unknown Windows GUI tool*'
+        { Test-WindowsGuiToolInstalled -ToolId VSCODE } | Should -Throw '*Unknown Windows GUI tool*'
     }
 
     It 'does not expose tokens or personal paths' {

@@ -19,16 +19,16 @@ $script:WindowsDockerDesktopWingetArguments = @(
 function Get-WindowsToolDefinition {
     param([Parameter(Mandatory)][string]$ToolId)
 
+    if (-not (@($script:WindowsPackageCatalog.Keys) -ccontains $ToolId)) { throw "Unknown Windows tool: $ToolId" }
     $definition = $script:WindowsPackageCatalog[$ToolId]
-    if ($null -eq $definition) { throw "Unknown Windows tool: $ToolId" }
     return $definition
 }
 
 function Get-WindowsGuiToolDefinition {
     param([Parameter(Mandatory)][string]$ToolId)
 
+    if (-not (@($script:WindowsGuiPackageCatalog.Keys) -ccontains $ToolId)) { throw "Unknown Windows GUI tool: $ToolId" }
     $definition = $script:WindowsGuiPackageCatalog[$ToolId]
-    if ($null -eq $definition) { throw "Unknown Windows GUI tool: $ToolId" }
     return $definition
 }
 
@@ -39,6 +39,7 @@ function Test-WindowsGuiToolInstalled {
         [scriptblock]$CommandLookup = { param($command) $null -ne (Get-Command $command -ErrorAction SilentlyContinue) }
     )
 
+    if (-not (@($script:WindowsGuiPackageCatalog.Keys) -ccontains $ToolId)) { throw "Unknown Windows GUI tool: $ToolId" }
     switch ($ToolId) {
         'antigravity' {
             return [bool](& $PathProbe 'C:\Program Files\Antigravity\Antigravity.exe') -or [bool](& $CommandLookup 'antigravity')

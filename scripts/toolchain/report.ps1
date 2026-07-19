@@ -45,6 +45,7 @@ function New-ToolchainReport {
         [AllowNull()][object]$FreeBytes = $null
     )
 
+    if (-not (@($script:ToolchainReportProfiles.Keys) -ccontains $Profile)) { throw "Unknown profile: $Profile" }
     $requiredTools = @($script:ToolchainReportProfiles[$Profile])
     $knownTools = @($requiredTools + $script:ToolchainReportGuiTools)
     $resultsByTool = @{}
@@ -62,7 +63,7 @@ function New-ToolchainReport {
             if ($property.Value -isnot [string]) { continue }
             $toolId = $property.Value
         }
-        if ($toolId -notin $knownTools -or $resultsByTool.ContainsKey($toolId)) { continue }
+        if (-not ($knownTools -ccontains $toolId) -or $resultsByTool.ContainsKey($toolId)) { continue }
         $resultsByTool[$toolId] = $result
     }
 

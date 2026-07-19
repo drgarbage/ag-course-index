@@ -97,6 +97,17 @@ setup() {
   [ "$(printf '%s' "$output" | grep -o '"status":"failed"' | wc -l | tr -d ' ')" -eq 2 ]
 }
 
+@test "readiness report rejects uppercase profiles and ignores uppercase result tool IDs" {
+  run render_toolchain_report BASE '[]'
+  [ "$status" -eq 64 ]
+
+  run render_toolchain_report base '[{"tool_id":"GIT_GH","status":"installed"},{"tool_id":"node_lts","status":"installed"}]'
+  [ "$status" -eq 0 ]
+  run python3 -c 'import json,sys; print(",".join(tool["status"] for tool in json.loads(sys.argv[1])["tools"]))' "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'failed,installed' ]
+}
+
 @test "readiness report redacts quoted macOS profile names through the safe line" {
   run render_toolchain_report base "[{\"tool_id\":\"git_gh\",\"status\":\"failed\",\"safe_message\":\"at /Users/O'Connor/Desktop/secret.txt suffix O'Connor\"}]"
   [ "$status" -eq 0 ]
@@ -159,6 +170,13 @@ load_macos_module() {
   [ "$status" -eq 64 ]
 }
 
+@test "uppercase profile and selected GUI identifiers are rejected" {
+  run get_course_toolchain_plan BASE ''
+  [ "$status" -eq 64 ]
+  run get_course_toolchain_plan base VSCODE
+  [ "$status" -eq 64 ]
+}
+
 @test "invalid catalog schema is rejected before planning" {
   invalid_catalog="$BATS_TEST_TMPDIR/unsupported-schema.json"
   printf '%s' '{"schema_version":2}' > "$invalid_catalog"
@@ -170,6 +188,14 @@ load_macos_module() {
 @test "catalog tool IDs outside the allowlist are rejected" {
   invalid_catalog="$BATS_TEST_TMPDIR/unknown-tool.json"
   printf '%s' '{"schema_version":1,"node_lts_major":24,"profiles":{"base":["evil"]},"gui_tools":["antigravity","vscode","browser"]}' > "$invalid_catalog"
+
+  run env COURSE_TOOLCHAIN_CATALOG="$invalid_catalog" bash -c 'source "$1"; get_course_toolchain_plan base ""' _ "$PLANNER"
+  [ "$status" -eq 64 ]
+}
+
+@test "uppercase catalog tool ID is rejected" {
+  invalid_catalog="$BATS_TEST_TMPDIR/uppercase-tool.json"
+  printf '%s' '{"schema_version":1,"node_lts_major":24,"profiles":{"base":["GIT_GH","node_lts"],"line":["git_gh","node_lts","cloudflared"],"data":["git_gh","node_lts","docker_desktop"],"full":["git_gh","node_lts","cloudflared","docker_desktop"]},"gui_tools":["antigravity","vscode","browser"]}' > "$invalid_catalog"
 
   run env COURSE_TOOLCHAIN_CATALOG="$invalid_catalog" bash -c 'source "$1"; get_course_toolchain_plan base ""' _ "$PLANNER"
   [ "$status" -eq 64 ]

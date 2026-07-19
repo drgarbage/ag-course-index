@@ -31,7 +31,7 @@ function Test-CourseToolchainExactList {
 
     if ($Actual.Count -ne $Expected.Count) { throw "Invalid $Description." }
     for ($index = 0; $index -lt $Expected.Count; $index++) {
-        if ($Actual[$index] -ne $Expected[$index]) { throw "Invalid $Description." }
+        if ($Actual[$index] -cne $Expected[$index]) { throw "Invalid $Description." }
     }
 }
 
@@ -56,7 +56,7 @@ function Get-CourseToolchainCatalog {
         $profileTools = @($catalog.profiles[$profileName])
         $seenTools = @{}
         foreach ($toolId in $profileTools) {
-            if ($toolId -isnot [string] -or $toolId -notin $script:CourseToolchainToolIds) {
+            if ($toolId -isnot [string] -or -not ($script:CourseToolchainToolIds -ccontains $toolId)) {
                 throw "Unknown tool ID: $toolId"
             }
             if ($seenTools.ContainsKey($toolId)) { throw "Duplicate tool ID: $toolId" }
@@ -67,7 +67,7 @@ function Get-CourseToolchainCatalog {
     $guiTools = @($catalog.gui_tools)
     $seenGuiTools = @{}
     foreach ($toolId in $guiTools) {
-        if ($toolId -isnot [string] -or $toolId -notin $script:CourseToolchainGuiTools) {
+        if ($toolId -isnot [string] -or -not ($script:CourseToolchainGuiTools -ccontains $toolId)) {
             throw "Unknown GUI tool ID: $toolId"
         }
         if ($seenGuiTools.ContainsKey($toolId)) { throw "Duplicate GUI tool ID: $toolId" }
@@ -77,7 +77,7 @@ function Get-CourseToolchainCatalog {
     if ($catalog.node_lts_major -ne 24) { throw 'Invalid Node LTS major.' }
     if (@($catalog.profiles.Keys).Count -ne $script:CourseToolchainProfiles.Count) { throw 'Invalid profile catalog.' }
     foreach ($profileName in $script:CourseToolchainProfiles.Keys) {
-        if (-not $catalog.profiles.ContainsKey($profileName)) { throw "Invalid profile catalog: $profileName" }
+        if (-not (@($catalog.profiles.Keys) -ccontains $profileName)) { throw "Invalid profile catalog: $profileName" }
         Test-CourseToolchainExactList -Actual @($catalog.profiles[$profileName]) -Expected $script:CourseToolchainProfiles[$profileName] -Description "profile $profileName"
     }
     Test-CourseToolchainExactList -Actual $guiTools -Expected $script:CourseToolchainGuiTools -Description 'GUI tool catalog'
@@ -91,13 +91,13 @@ function Get-CourseToolchainPlan {
         [string[]]$GuiTools = @()
     )
 
+    if (-not (@($script:CourseToolchainProfiles.Keys) -ccontains $Profile)) { throw "Unknown profile: $Profile" }
     $catalog = Get-CourseToolchainCatalog
-    if (-not $catalog.profiles.ContainsKey($Profile)) { throw "Unknown profile: $Profile" }
 
     $requestedGuiTools = @($GuiTools | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $seenGuiTools = @{}
     foreach ($toolId in $requestedGuiTools) {
-        if ($toolId -notin @($catalog.gui_tools)) { throw "Unknown GUI tool: $toolId" }
+        if (-not (@($catalog.gui_tools) -ccontains $toolId)) { throw "Unknown GUI tool: $toolId" }
         if ($seenGuiTools.ContainsKey($toolId)) { throw "Duplicate GUI tool: $toolId" }
         $seenGuiTools[$toolId] = $true
     }
@@ -137,6 +137,7 @@ function Install-CourseToolchainWindowsGuiTool {
         }
     )
 
+    if (-not ($script:CourseToolchainGuiTools -ccontains $ToolId)) { throw "Unknown GUI tool: $ToolId" }
     Write-Host "Impact: $ToolId will be installed from its fixed WinGet package ID; no GUI application will be started."
     $confirmed = [bool](& $ConfirmationProvider "Install $ToolId")
     Invoke-WindowsGuiToolInstall -ToolId $ToolId -Confirmed:$confirmed
