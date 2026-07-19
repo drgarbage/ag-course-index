@@ -4,6 +4,12 @@ $script:WindowsPackageCatalog = @{
     node_lts = @{ id = 'OpenJS.NodeJS.LTS'; verify = @('node', '--version'); minimum_version = '24.4.0' }
     cloudflared = @{ id = 'Cloudflare.cloudflared'; verify = @('cloudflared', '--version') }
 }
+$script:WindowsDockerDesktopPackageId = 'Docker.DockerDesktop'
+$script:WindowsDockerDesktopPath = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+$script:WindowsDockerDesktopWingetArguments = @(
+    'install', '--id', $script:WindowsDockerDesktopPackageId, '--exact', '--source', 'winget',
+    '--accept-source-agreements', '--accept-package-agreements'
+)
 
 function Get-WindowsToolDefinition {
     param([Parameter(Mandatory)][string]$ToolId)
@@ -94,6 +100,9 @@ function Invoke-WindowsWingetCommand {
             }
         }
     }
+    if (-not $allowed -and (Test-WindowsExactArgumentList -Actual $Arguments -Expected $script:WindowsDockerDesktopWingetArguments)) {
+        $allowed = $true
+    }
     if (-not $allowed) { throw 'Unknown WinGet arguments.' }
 
     try {
@@ -108,6 +117,211 @@ function Invoke-WindowsWingetCommand {
         stdout = [string]($output -join [Environment]::NewLine)
         stderr = ''
     }
+}
+
+function Get-WindowsDockerPrerequisites {
+    param(
+        [scriptblock]$OsProbe = { (Get-CimInstance -ClassName Win32_OperatingSystem).Caption },
+        [scriptblock]$VirtualizationProbe = {
+            $processor = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
+            [bool]$processor.VirtualizationFirmwareEnabled
+        },
+        [scriptblock]$WslProbe = {
+            $output = & wsl.exe --status 2>$null
+            if ($LASTEXITCODE -ne 0) { return $null }
+            [string]($output -join [Environment]::NewLine)
+        }
+    )
+
+    $wslProbeResult = & $WslProbe
+    $wsl2 = if ($wslProbeResult -is [bool]) {
+        [bool]$wslProbeResult
+    } else {
+        [string]$wslProbeResult -match '(?m)(?:^|\r?\n)[^\r\n0-9]*2\s*$'
+    }
+    [pscustomobject][ordered]@{
+        os = [string](& $OsProbe)
+        virtualization = [bool](& $VirtualizationProbe)
+        wsl2 = $wsl2
+    }
+}
+
+function Invoke-WindowsDockerCommand {
+    param(
+        [Parameter(Mandatory)][string]$Arguments,
+        [Parameter(Mandatory)][int]$TimeoutMilliseconds
+    )
+
+    if ($Arguments -notin @('version', 'compose version')) { throw 'Unknown Docker arguments.' }
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'docker'
+    $startInfo.Arguments = $Arguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    try {
+        $process = [System.Diagnostics.Process]::Start($startInfo)
+        if ($null -eq $process) { return 1 }
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            $process.Kill()
+            $process.WaitForExit()
+            return 1
+        }
+        return [int]$process.ExitCode
+    } catch {
+        return 1
+    }
+}
+
+function Test-WindowsDockerReady {
+    param(
+        [int]$CommandTimeoutMilliseconds = 10000,
+        [scriptblock]$DockerProbe = {
+            param($timeoutMilliseconds)
+            Invoke-WindowsDockerCommand -Arguments 'version' -TimeoutMilliseconds $timeoutMilliseconds
+        },
+        [scriptblock]$ComposeProbe = {
+            param($arguments, $timeoutMilliseconds)
+            if ($arguments -ne 'compose version') { throw 'Unknown Docker Compose arguments.' }
+            Invoke-WindowsDockerCommand -Arguments $arguments -TimeoutMilliseconds $timeoutMilliseconds
+        }
+    )
+
+    try {
+        $deadline = [DateTime]::UtcNow.AddMilliseconds([Math]::Max($CommandTimeoutMilliseconds, 1))
+        $dockerTimeoutMilliseconds = [Math]::Max(1, [int][Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalMilliseconds))
+        $dockerExitCode = & $DockerProbe $dockerTimeoutMilliseconds
+        if ($dockerExitCode -ne 0) { return [pscustomobject]@{ status = 'failed' } }
+        $composeTimeoutMilliseconds = [Math]::Max(1, [int][Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalMilliseconds))
+        $composeExitCode = & $ComposeProbe 'compose version' $composeTimeoutMilliseconds
+    } catch {
+        return [pscustomobject]@{ status = 'failed' }
+    }
+    if ($dockerExitCode -eq 0 -and $composeExitCode -eq 0) {
+        return [pscustomobject]@{ status = 'ready' }
+    }
+    return [pscustomobject]@{ status = 'failed' }
+}
+
+function Wait-WindowsDockerReady {
+    param(
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [scriptblock]$Probe
+    )
+
+    $effectiveTimeoutSeconds = [Math]::Min([Math]::Max($TimeoutSeconds, 1), 120)
+    $deadline = [DateTime]::UtcNow.AddSeconds($effectiveTimeoutSeconds)
+    do {
+        try {
+            $remainingMilliseconds = [Math]::Max(1, [int][Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalMilliseconds))
+            $ready = if ($null -eq $Probe) {
+                (Test-WindowsDockerReady -CommandTimeoutMilliseconds $remainingMilliseconds).status -eq 'ready'
+            } else {
+                $probePowerShell = [System.Management.Automation.PowerShell]::Create()
+                try {
+                    [void]$probePowerShell.AddScript($Probe.ToString())
+                    $probeInvocation = $probePowerShell.BeginInvoke()
+                    if (-not $probeInvocation.AsyncWaitHandle.WaitOne($remainingMilliseconds)) {
+                        $probePowerShell.Stop()
+                        $false
+                    } else {
+                        [bool]($probePowerShell.EndInvoke($probeInvocation) | Select-Object -Last 1)
+                    }
+                } finally {
+                    $probePowerShell.Dispose()
+                }
+            }
+            if ($ready) {
+                return [pscustomobject]@{ status = 'ready' }
+            }
+        } catch {
+            # Docker Desktop can be launching; keep polling until the deadline.
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { break }
+        Start-Sleep -Milliseconds 250
+    } while ($true)
+
+    return [pscustomobject]@{ status = 'failed' }
+}
+
+function Install-WindowsDockerDesktop {
+    param(
+        [switch]$Confirmed,
+        [switch]$WslChangeConfirmed,
+        [scriptblock]$PrerequisiteProvider = { Get-WindowsDockerPrerequisites },
+        [scriptblock]$WslInstaller = {
+            param($arguments)
+            & wsl.exe @arguments 2>&1 | Out-Null
+            @{ exit_code = if ($LASTEXITCODE -eq 0) { 0 } else { 1 } }
+        },
+        [scriptblock]$PackageRunner = {
+            param($command, $arguments)
+            if ($command -ne 'winget') { throw 'Unknown package command.' }
+            Invoke-WindowsWingetCommand -Arguments $arguments
+        },
+        [scriptblock]$AppStarter = {
+            param($path)
+            Start-Process -FilePath $path
+            $true
+        },
+        [scriptblock]$ReadyWaiter = { Wait-WindowsDockerReady -TimeoutSeconds 120 }
+    )
+
+    if (-not $Confirmed) {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'skipped' }
+    }
+
+    $prerequisites = & $PrerequisiteProvider
+    $changeRequiresRestart = $false
+    if ($prerequisites -is [System.Collections.IDictionary] -and $prerequisites.Contains('change_requires_restart')) {
+        $changeRequiresRestart = [bool]$prerequisites['change_requires_restart']
+    } elseif ($null -ne $prerequisites.PSObject.Properties['change_requires_restart']) {
+        $changeRequiresRestart = [bool]$prerequisites.change_requires_restart
+    }
+    if ($changeRequiresRestart) {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'needs_restart' }
+    }
+    if ([string]$prerequisites.os -notmatch '(?i)^windows\b') {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'unsupported_os' }
+    }
+    if (-not [bool]$prerequisites.virtualization) {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'virtualization_unavailable' }
+    }
+    if (-not [bool]$prerequisites.wsl2) {
+        if (-not $WslChangeConfirmed) {
+            return [pscustomobject]@{
+                tool_id = 'docker_desktop'
+                status = 'needs_wsl_confirmation'
+                impact = 'WSL 2 installation will require a Windows restart.'
+            }
+        }
+        $wslResult = & $WslInstaller @('--install', '--no-distribution')
+        if ($null -eq $wslResult -or [int]$wslResult.exit_code -ne 0) {
+            return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'wsl_install_failed' }
+        }
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'needs_restart' }
+    }
+
+    $wingetCheck = & $PackageRunner 'winget' @('--version')
+    if ($null -eq $wingetCheck -or [int]$wingetCheck.exit_code -ne 0) {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'winget_unavailable' }
+    }
+    $installResult = & $PackageRunner 'winget' $script:WindowsDockerDesktopWingetArguments
+    if ($null -eq $installResult -or [int]$installResult.exit_code -ne 0) {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'winget_install_failed' }
+    }
+
+    try {
+        if (-not [bool](& $AppStarter $script:WindowsDockerDesktopPath)) {
+            return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'desktop_start_failed' }
+        }
+    } catch {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'desktop_start_failed' }
+    }
+    $readyResult = & $ReadyWaiter
+    if ($null -ne $readyResult -and $readyResult.status -eq 'ready') {
+        return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'ready' }
+    }
+    return [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; reason = 'docker_not_ready' }
 }
 
 function Invoke-WindowsToolInstall {

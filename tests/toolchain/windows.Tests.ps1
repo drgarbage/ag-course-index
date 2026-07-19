@@ -2,6 +2,7 @@ BeforeAll {
     $script:PlannerPath = Join-Path $PSScriptRoot '../../scripts/course-toolchain-windows.ps1'
     $script:InstallerPath = Join-Path $PSScriptRoot '../../scripts/toolchain/windows.ps1'
     $script:WindowsToolsFixturePath = Join-Path $PSScriptRoot 'fixtures/windows-tools.json'
+    $script:WindowsDockerFixturePath = Join-Path $PSScriptRoot 'fixtures/docker-windows.json'
     . $script:PlannerPath
 }
 
@@ -142,5 +143,136 @@ Describe 'Windows Node.js and Cloudflare toolchain installer' {
     It 'ignores external package ids and commands' {
         { Invoke-WindowsToolInstall -ToolId RUN_COMMAND -Confirmed:$true } | Should -Throw
         (Get-Content $script:InstallerPath -Raw) | Should -Not -Match 'Invoke-Expression|\biex\b'
+    }
+}
+
+Describe 'Windows Docker Desktop installer' {
+    It 'reports only Docker prerequisites without changing the host' {
+        $fixture = Get-Content $script:WindowsDockerFixturePath -Raw | ConvertFrom-Json
+        $result = Get-WindowsDockerPrerequisites -OsProbe { $fixture.os } -VirtualizationProbe { $fixture.virtualization } -WslProbe { $fixture.wsl2 }
+
+        @($result.PSObject.Properties.Name) | Should -Be @('os', 'virtualization', 'wsl2')
+        $result.os | Should -Be 'Windows 11'
+        $result.virtualization | Should -BeTrue
+        $result.wsl2 | Should -BeTrue
+    }
+
+    It 'recognizes a localized WSL2 default-version status' {
+        $result = Get-WindowsDockerPrerequisites -OsProbe { 'Windows 11' } -VirtualizationProbe { $true } -WslProbe { "預設版本: 2" }
+
+        $result.wsl2 | Should -BeTrue
+    }
+
+    It 'does not treat a localized WSL1 status as WSL2' {
+        $result = Get-WindowsDockerPrerequisites -OsProbe { 'Windows 11' } -VirtualizationProbe { $true } -WslProbe { "預設版本: 1" }
+
+        $result.wsl2 | Should -BeFalse
+    }
+
+    It 'returns needs_restart without forcing reboot when WSL changed' {
+        $r = Install-WindowsDockerDesktop -Confirmed -PrerequisiteProvider { @{ wsl2 = $false; change_requires_restart = $true } }
+
+        $r.status | Should -Be 'needs_restart'
+    }
+
+    It 'does not install Docker Desktop without Docker confirmation' {
+        $script:dockerPackageCalls = 0
+        $result = Install-WindowsDockerDesktop -Confirmed:$false -PackageRunner { $script:dockerPackageCalls++ }
+
+        $result.status | Should -Be 'skipped'
+        $script:dockerPackageCalls | Should -Be 0
+    }
+
+    It 'stops before package installation when Windows is not the host OS' {
+        $script:dockerPackageCalls = 0
+        $result = Install-WindowsDockerDesktop -Confirmed -PrerequisiteProvider { @{ os = 'Linux'; virtualization = $true; wsl2 = $true } } -PackageRunner {
+            $script:dockerPackageCalls++
+            @{ exit_code = 0 }
+        } -AppStarter { $true } -ReadyWaiter { @{ status = 'ready' } }
+
+        $result.status | Should -Be 'failed'
+        $result.reason | Should -Be 'unsupported_os'
+        $script:dockerPackageCalls | Should -Be 0
+    }
+
+    It 'does not change WSL without separate WSL confirmation' {
+        $script:wslCalls = 0
+        $result = Install-WindowsDockerDesktop -Confirmed -PrerequisiteProvider { @{ os = 'Windows 11'; virtualization = $true; wsl2 = $false } } -WslInstaller {
+            param($arguments)
+            $script:wslCalls++
+            @{ exit_code = 0 }
+        }
+
+        $result.status | Should -Be 'needs_wsl_confirmation'
+        $script:wslCalls | Should -Be 0
+    }
+
+    It 'uses the fixed WSL argv only after WSL confirmation' {
+        $script:wslCalls = [System.Collections.Generic.List[object]]::new()
+        $result = Install-WindowsDockerDesktop -Confirmed -WslChangeConfirmed -PrerequisiteProvider { @{ os = 'Windows 11'; virtualization = $true; wsl2 = $false } } -WslInstaller {
+            param($arguments)
+            $script:wslCalls.Add(@($arguments))
+            @{ exit_code = 0 }
+        }
+
+        $script:wslCalls.Count | Should -Be 1
+        $script:wslCalls[0] | Should -Be @('--install', '--no-distribution')
+        $result.status | Should -Be 'needs_restart'
+    }
+
+    It 'uses the fixed WinGet Docker Desktop argv after prerequisites are ready' {
+        $script:dockerPackageCalls = [System.Collections.Generic.List[object]]::new()
+        $result = Install-WindowsDockerDesktop -Confirmed -PrerequisiteProvider { @{ os = 'Windows 11'; virtualization = $true; wsl2 = $true } } -PackageRunner {
+            param($command, $arguments)
+            $script:dockerPackageCalls.Add([pscustomobject]@{ command = $command; arguments = @($arguments) })
+            @{ exit_code = 0; stdout = 'ok'; stderr = '' }
+        } -AppStarter { param($path) $true } -ReadyWaiter { @{ status = 'ready' } }
+
+        $script:dockerPackageCalls.Count | Should -Be 2
+        $script:dockerPackageCalls[0].command | Should -Be 'winget'
+        $script:dockerPackageCalls[0].arguments | Should -Be @('--version')
+        $script:dockerPackageCalls[1].command | Should -Be 'winget'
+        $script:dockerPackageCalls[1].arguments | Should -Be @(
+            'install', '--id', 'Docker.DockerDesktop', '--exact', '--source', 'winget',
+            '--accept-source-agreements', '--accept-package-agreements'
+        )
+        $result.status | Should -Be 'ready'
+    }
+
+    It 'starts the fixed Docker Desktop application path before waiting for the engine' {
+        $script:startedPath = $null
+        $result = Install-WindowsDockerDesktop -Confirmed -PrerequisiteProvider { @{ os = 'Windows 11'; virtualization = $true; wsl2 = $true } } -PackageRunner {
+            @{ exit_code = 0 }
+        } -AppStarter {
+            param($path)
+            $script:startedPath = $path
+            $true
+        } -ReadyWaiter { @{ status = 'ready' } }
+
+        $script:startedPath | Should -Be 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+        $result.status | Should -Be 'ready'
+    }
+
+    It 'does not accept legacy docker-compose as Compose v2' {
+        $r = Test-WindowsDockerReady -DockerProbe { 0 } -ComposeProbe { param($args) if ($args -eq 'compose version') { 1 } }
+
+        $r.status | Should -Be 'failed'
+    }
+
+    It 'times out with truthful status' {
+        (Wait-WindowsDockerReady -TimeoutSeconds 1 -Probe { $false }).status | Should -Be 'failed'
+    }
+
+    It 'does not exceed the timeout when a probe blocks' {
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = Wait-WindowsDockerReady -TimeoutSeconds 1 -Probe { Start-Sleep -Seconds 2; $false }
+        $stopwatch.Stop()
+
+        $result.status | Should -Be 'failed'
+        $stopwatch.Elapsed.TotalSeconds | Should -BeLessOrEqual 1.5
+    }
+
+    It 'does not expose a restart command or the legacy Compose executable' {
+        Get-Content $script:InstallerPath -Raw | Should -Not -Match '(?i)Restart-Computer|shutdown\.exe|\bdocker-compose\b'
     }
 }

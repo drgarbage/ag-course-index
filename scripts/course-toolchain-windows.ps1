@@ -104,3 +104,24 @@ function Get-CourseToolchainPlan {
         [pscustomobject]@{ tool_id = [string]$toolId }
     }
 }
+
+function Install-CourseToolchainWindowsDockerDesktop {
+    param(
+        [scriptblock]$ConfirmationProvider = {
+            param($message)
+            (Read-Host "$message [y/N]") -match '^(?i:y|yes)$'
+        },
+        [scriptblock]$PrerequisiteProvider = { Get-WindowsDockerPrerequisites }
+    )
+
+    $prerequisites = & $PrerequisiteProvider
+    $wslChangeConfirmed = $false
+    if (-not [bool]$prerequisites.wsl2) {
+        Write-Host 'Impact: installing WSL 2 changes Windows features and requires a restart. Docker Desktop will not be installed until Windows restarts.'
+        $wslChangeConfirmed = [bool](& $ConfirmationProvider 'Install WSL 2')
+    }
+
+    Write-Host 'Impact: Docker Desktop installs Docker Desktop and starts its official application.'
+    $dockerConfirmed = [bool](& $ConfirmationProvider 'Install Docker Desktop')
+    Install-WindowsDockerDesktop -Confirmed:$dockerConfirmed -WslChangeConfirmed:$wslChangeConfirmed -PrerequisiteProvider $PrerequisiteProvider
+}
