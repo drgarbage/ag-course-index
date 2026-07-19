@@ -4,6 +4,9 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$script:CourseToolchainWindowsModulePath = Join-Path $PSScriptRoot 'toolchain/windows.ps1'
+. $script:CourseToolchainWindowsModulePath
+
 $script:CourseToolchainCatalogPath = Join-Path $PSScriptRoot 'toolchain/catalog.json'
 $script:CourseToolchainToolIds = @(
     'git_gh', 'node_lts', 'cloudflared', 'docker_desktop',

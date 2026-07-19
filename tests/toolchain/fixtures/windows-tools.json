@@ -1,0 +1,8 @@
+{
+  "node_lts": {
+    "version": "v24.4.0"
+  },
+  "cloudflared": {
+    "version": "2025.7.0"
+  }
+}

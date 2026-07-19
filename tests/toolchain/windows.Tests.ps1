@@ -1,5 +1,7 @@
 BeforeAll {
     $script:PlannerPath = Join-Path $PSScriptRoot '../../scripts/course-toolchain-windows.ps1'
+    $script:InstallerPath = Join-Path $PSScriptRoot '../../scripts/toolchain/windows.ps1'
+    $script:WindowsToolsFixturePath = Join-Path $PSScriptRoot 'fixtures/windows-tools.json'
     . $script:PlannerPath
 }
 
@@ -53,5 +55,46 @@ Describe 'Course toolchain profile planner' {
 
         { Get-CourseToolchainCatalog -CatalogPath $path } |
             Should -Throw '*Unknown GUI tool ID*'
+    }
+}
+
+Describe 'Windows Node.js and Cloudflare toolchain installer' {
+    It 'detects a compliant Node LTS and skips installation' {
+        $fixture = Get-Content $script:WindowsToolsFixturePath -Raw | ConvertFrom-Json
+        $state = Get-WindowsToolState -ToolId node_lts -CommandLookup { $true } -VersionRunner { $fixture.node_lts.version }
+
+        $state.status | Should -Be 'ready'
+    }
+
+    It 'never installs cloudflared without confirmation' {
+        $script:calls = 0
+        $result = Invoke-WindowsToolInstall -ToolId cloudflared -Confirmed:$false -PackageRunner { $script:calls++ }
+
+        $result.status | Should -Be 'skipped'
+        $script:calls | Should -Be 0
+    }
+
+    It 'uses the fixed WinGet argv for the Node LTS package' {
+        $script:packageCalls = [System.Collections.Generic.List[object]]::new()
+        $result = Invoke-WindowsToolInstall -ToolId node_lts -Confirmed:$true -CommandLookup { $false } -PackageRunner {
+            param($command, $arguments)
+            $script:packageCalls.Add([pscustomobject]@{ command = $command; arguments = @($arguments) })
+            @{ exit_code = 0; stdout = 'ok'; stderr = '' }
+        }
+
+        $script:packageCalls.Count | Should -Be 2
+        $script:packageCalls[0].command | Should -Be 'winget'
+        $script:packageCalls[0].arguments | Should -Be @('--version')
+        $script:packageCalls[1].command | Should -Be 'winget'
+        $script:packageCalls[1].arguments | Should -Be @(
+            'install', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--source', 'winget',
+            '--accept-source-agreements', '--accept-package-agreements'
+        )
+        $result.status | Should -Be 'needs_restart'
+    }
+
+    It 'ignores external package ids and commands' {
+        { Invoke-WindowsToolInstall -ToolId RUN_COMMAND -Confirmed:$true } | Should -Throw
+        (Get-Content $script:InstallerPath -Raw) | Should -Not -Match 'Invoke-Expression|\biex\b'
     }
 }
