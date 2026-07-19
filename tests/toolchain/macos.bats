@@ -31,10 +31,85 @@ setup() {
 }
 
 @test "readiness report redacts tokens and personal paths" {
-  run render_toolchain_report base '[{"safe_message":"token ghp_fake at /Users/alice"}]'
+  run render_toolchain_report base '[{"tool_id":"git_gh","status":"failed","safe_message":"token ghp_fake at /Users/Alice Smith/Desktop/secret.txt"}]'
   [ "$status" -eq 0 ]
   [[ "$output" != *ghp_fake* ]]
-  [[ "$output" != *alice* ]]
+  [[ "$output" != *Alice* ]]
+  [[ "$output" != *Smith* ]]
+}
+
+@test "readiness report normalizes ready and marks a complete base profile ready" {
+  run render_toolchain_report base '[{"tool_id":"git_gh","status":"ready","version":"2.76.0"},{"tool_id":"node_lts","status":"updated","version":"v24.4.0"}]' 2147483648
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":true'* ]]
+  [[ "$output" == *'"status":"installed"'* ]]
+  [[ "$output" == *'"disk":{"free_bytes":2147483648,"required_bytes":2147483648,"status":"enough"}'* ]]
+}
+
+@test "readiness report uses the restart next step" {
+  run render_toolchain_report base '[{"tool_id":"git_gh","status":"installed"},{"tool_id":"node_lts","status":"needs_restart"}]' 2147483648
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":false'* ]]
+  [[ "$output" == *'"restart_required":true'* ]]
+  [[ "$output" == *'"next_step":"請重新啟動電腦後重新執行 readiness report。"'* ]]
+}
+
+@test "readiness report blocks readiness when free disk is insufficient" {
+  run render_toolchain_report base '[{"tool_id":"git_gh","status":"installed"},{"tool_id":"node_lts","status":"installed"}]' 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":false'* ]]
+  [[ "$output" == *'"status":"insufficient"'* ]]
+  [[ "$output" == *'"next_step":"可用磁碟空間不足；請釋放空間後重新執行 readiness report。"'* ]]
+}
+
+@test "readiness report leaves disk unknown without injected free bytes" {
+  run render_toolchain_report base '[]'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"disk":{"free_bytes":null,"required_bytes":2147483648,"status":"unknown"}'* ]]
+}
+
+@test "readiness report treats malformed injected free bytes as unknown" {
+  run render_toolchain_report base '[]' not-a-number
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"unknown"'* ]]
+}
+
+@test "readiness report uses fixed required bytes for every profile" {
+  run bash -c 'source "$1"; render_toolchain_report base "[]"; render_toolchain_report line "[]"; render_toolchain_report data "[]"; render_toolchain_report full "[]"' _ "$REPORT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"required_bytes":2147483648'* ]]
+  [[ "$output" == *'"required_bytes":3221225472'* ]]
+  [[ "$output" == *'"required_bytes":12884901888'* ]]
+  [[ "$output" == *'"required_bytes":13958643712'* ]]
+}
+
+@test "readiness report preserves canonical statuses and maps ready" {
+  run render_toolchain_report base '[{"tool_id":"git_gh","status":"ready"},{"tool_id":"node_lts","status":"updated"},{"tool_id":"antigravity","status":"needs_restart"},{"tool_id":"browser","status":"failed"},{"tool_id":"vscode","status":"skipped"}]'
+  [ "$status" -eq 0 ]
+  run python3 -c 'import json,sys; print(",".join(tool["status"] for tool in json.loads(sys.argv[1])["tools"]))' "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'installed,updated,needs_restart,failed,skipped' ]
+}
+
+@test "readiness report fails closed for non-string tool IDs and statuses" {
+  run render_toolchain_report base '[{"tool_id":["git_gh"],"status":"ready"},{"tool_id":"node_lts","status":{"value":"ready"}}]'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | grep -o '"status":"failed"' | wc -l | tr -d ' ')" -eq 2 ]
+}
+
+@test "macOS GUI catalog uses all fixed casks" {
+  run bash -c 'source "$1"; macos_gui_cask antigravity; macos_gui_cask vscode; macos_gui_cask browser' _ "$MODULE"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'antigravity\nvisual-studio-code\ngoogle-chrome' ]
+}
+
+@test "macOS accepts either Chrome or Edge as browser ready" {
+  load_macos_module
+  MACOS_CHROME_APP_PATH="$BATS_TEST_TMPDIR/Google Chrome.app"
+  MACOS_EDGE_APP_PATH="$BATS_TEST_TMPDIR/Microsoft Edge.app"
+  mkdir -p "$MACOS_EDGE_APP_PATH"
+  run macos_gui_ready browser
+  [ "$status" -eq 0 ]
 }
 
 load_macos_module() {

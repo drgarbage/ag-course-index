@@ -33,23 +33,24 @@ function Get-WindowsGuiToolDefinition {
 }
 
 function Test-WindowsGuiToolInstalled {
-    param([Parameter(Mandatory)][string]$ToolId)
+    param(
+        [Parameter(Mandatory)][string]$ToolId,
+        [scriptblock]$PathProbe = { param($path) Test-Path -LiteralPath $path -PathType Leaf },
+        [scriptblock]$CommandLookup = { param($command) $null -ne (Get-Command $command -ErrorAction SilentlyContinue) }
+    )
 
     switch ($ToolId) {
         'antigravity' {
-            return (Test-Path -LiteralPath 'C:\Program Files\Antigravity\Antigravity.exe' -PathType Leaf) -or
-                ($null -ne (Get-Command 'antigravity' -ErrorAction SilentlyContinue))
+            return [bool](& $PathProbe 'C:\Program Files\Antigravity\Antigravity.exe') -or [bool](& $CommandLookup 'antigravity')
         }
         'vscode' {
-            return (Test-Path -LiteralPath 'C:\Program Files\Microsoft VS Code\Code.exe' -PathType Leaf) -or
-                ($null -ne (Get-Command 'code' -ErrorAction SilentlyContinue))
+            return [bool](& $PathProbe 'C:\Program Files\Microsoft VS Code\Code.exe') -or [bool](& $CommandLookup 'code')
         }
         'browser' {
-            return (Test-Path -LiteralPath 'C:\Program Files\Google\Chrome\Application\chrome.exe' -PathType Leaf) -or
-                (Test-Path -LiteralPath 'C:\Program Files\Microsoft\Edge\Application\msedge.exe' -PathType Leaf) -or
-                (Test-Path -LiteralPath 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' -PathType Leaf) -or
-                ($null -ne (Get-Command 'chrome' -ErrorAction SilentlyContinue)) -or
-                ($null -ne (Get-Command 'msedge' -ErrorAction SilentlyContinue))
+            return [bool](& $PathProbe 'C:\Program Files\Google\Chrome\Application\chrome.exe') -or
+                [bool](& $PathProbe 'C:\Program Files\Microsoft\Edge\Application\msedge.exe') -or
+                [bool](& $PathProbe 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe') -or
+                [bool](& $CommandLookup 'chrome') -or [bool](& $CommandLookup 'msedge')
         }
         default { throw "Unknown Windows GUI tool: $ToolId" }
     }

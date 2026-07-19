@@ -96,8 +96,90 @@ Describe 'Course toolchain GUI and readiness report' {
     }
 
     It 'does not expose tokens or personal paths' {
-        (New-ToolchainReport -Profile base -Results @(@{ safe_message = 'token ghp_fake at C:\Users\alice' })) |
-            ConvertTo-Json -Depth 8 | Should -Not -Match 'ghp_fake|alice'
+        (New-ToolchainReport -Profile base -Results @(@{ tool_id = 'git_gh'; status = 'failed'; safe_message = 'token ghp_fake at C:\Users\Alice Smith\Desktop\secret.txt' })) |
+            ConvertTo-Json -Depth 8 | Should -Not -Match 'ghp_fake|Alice|Smith'
+    }
+
+    It 'normalizes ready to installed and marks a complete base profile ready' {
+        $report = New-ToolchainReport -Profile base -FreeBytes 2147483648 -Results @(
+            @{ tool_id = 'git_gh'; status = 'ready'; version = '2.76.0' },
+            @{ tool_id = 'node_lts'; status = 'updated'; version = 'v24.4.0' }
+        )
+
+        $report.ready | Should -BeTrue
+        $report.tools.status | Should -Be @('installed', 'updated')
+        $report.disk | ConvertTo-Json -Compress | Should -Be '{"free_bytes":2147483648,"required_bytes":2147483648,"status":"enough"}'
+    }
+
+    It 'uses the restart next step for a required tool that needs restart' {
+        $report = New-ToolchainReport -Profile base -FreeBytes 2147483648 -Results @(
+            @{ tool_id = 'git_gh'; status = 'installed' },
+            @{ tool_id = 'node_lts'; status = 'needs_restart' }
+        )
+
+        $report.ready | Should -BeFalse
+        $report.restart_required | Should -BeTrue
+        $report.next_step | Should -Be '請重新啟動電腦後重新執行 readiness report。'
+    }
+
+    It 'marks an otherwise ready profile unready when free disk is insufficient' {
+        $report = New-ToolchainReport -Profile base -FreeBytes 1 -Results @(
+            @{ tool_id = 'git_gh'; status = 'installed' },
+            @{ tool_id = 'node_lts'; status = 'installed' }
+        )
+
+        $report.ready | Should -BeFalse
+        $report.disk.status | Should -Be 'insufficient'
+        $report.next_step | Should -Be '可用磁碟空間不足；請釋放空間後重新執行 readiness report。'
+    }
+
+    It 'reports unknown disk state when free bytes are not injected' {
+        (New-ToolchainReport -Profile base -Results @()).disk.status | Should -Be 'unknown'
+    }
+
+    It 'treats malformed injected free bytes as unknown' {
+        (New-ToolchainReport -Profile base -Results @() -FreeBytes 'not-a-number').disk.status | Should -Be 'unknown'
+    }
+
+    It 'uses fixed required bytes for every profile' {
+        (New-ToolchainReport -Profile base -Results @()).disk.required_bytes | Should -Be 2147483648
+        (New-ToolchainReport -Profile line -Results @()).disk.required_bytes | Should -Be 3221225472
+        (New-ToolchainReport -Profile data -Results @()).disk.required_bytes | Should -Be 12884901888
+        (New-ToolchainReport -Profile full -Results @()).disk.required_bytes | Should -Be 13958643712
+    }
+
+    It 'preserves every canonical status while mapping ready to installed' {
+        $report = New-ToolchainReport -Profile base -Results @(
+            @{ tool_id = 'git_gh'; status = 'ready' },
+            @{ tool_id = 'node_lts'; status = 'updated' },
+            @{ tool_id = 'antigravity'; status = 'needs_restart' },
+            @{ tool_id = 'browser'; status = 'failed' },
+            @{ tool_id = 'vscode'; status = 'skipped' }
+        )
+
+        $report.tools.status | Should -Be @('installed', 'updated', 'needs_restart', 'failed', 'skipped')
+    }
+
+    It 'fails closed for non-string tool IDs and statuses' {
+        $report = New-ToolchainReport -Profile base -Results @(
+            @{ tool_id = @('git_gh'); status = 'ready' },
+            @{ tool_id = 'node_lts'; status = @{ value = 'ready' } }
+        )
+
+        $report.tools.status | Should -Be @('failed', 'failed')
+    }
+
+    It 'contains all fixed Windows GUI package IDs' {
+        (Get-WindowsGuiToolDefinition antigravity).id | Should -Be 'Google.Antigravity'
+        (Get-WindowsGuiToolDefinition vscode).id | Should -Be 'Microsoft.VisualStudioCode'
+        (Get-WindowsGuiToolDefinition browser).id | Should -Be 'Google.Chrome'
+    }
+
+    It 'accepts either Chrome or Edge as browser ready' {
+        Test-WindowsGuiToolInstalled -ToolId browser -PathProbe { param($path) $path -like '*Google\Chrome*' } -CommandLookup { $false } |
+            Should -BeTrue
+        Test-WindowsGuiToolInstalled -ToolId browser -PathProbe { param($path) $path -like '*Microsoft\Edge*' } -CommandLookup { $false } |
+            Should -BeTrue
     }
 }
 
