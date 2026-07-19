@@ -86,3 +86,15 @@ except (OSError, json.JSONDecodeError, CatalogError) as error:
     sys.exit(64)
 ' "$catalog_path" "$profile" "$gui_tools"
 }
+
+install_course_toolchain_macos_docker_desktop() {
+  local confirmation="${1:-}"
+  if [ -z "$confirmation" ]; then
+    printf '%s' 'Docker Desktop will be downloaded, copied to /Applications, and started. Continue? [y/N] ' >&2
+    read -r confirmation
+  fi
+  case "$confirmation" in
+    y|Y|yes|YES) install_macos_docker_desktop yes ;;
+    *) install_macos_docker_desktop no ;;
+  esac
+}

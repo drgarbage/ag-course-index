@@ -4,6 +4,7 @@ setup() {
   PLANNER="$BATS_TEST_DIRNAME/../../scripts/course-toolchain-macos.command"
   MODULE="$BATS_TEST_DIRNAME/../../scripts/toolchain/macos.sh"
   FIXTURE="$BATS_TEST_DIRNAME/fixtures/macos-tools.json"
+  DOCKER_FIXTURE="$BATS_TEST_DIRNAME/fixtures/docker-macos.json"
   # shellcheck disable=SC1090
   source "$PLANNER"
 }
@@ -179,4 +180,96 @@ STUB
   load_macos_module
   export TOOLCHAIN_DOWNLOAD_URL='https://example.invalid/evil.pkg'
   [ "$(macos_vendor_url cloudflared arm64)" = 'https://github.com/cloudflare/cloudflared/releases/download/2025.6.1/cloudflared-arm64.pkg' ]
+}
+
+@test "Docker architecture selects only the matching official artifact" {
+  load_macos_module
+  export TOOLCHAIN_ARCH=arm64 TOOLCHAIN_DOCKER_FIXTURE="$DOCKER_FIXTURE"
+
+  run docker_macos_artifact
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Docker-AppleSilicon.dmg'* ]]
+  [[ "$output" != *'Docker-Intel.dmg'* ]]
+}
+
+@test "Intel Docker architecture selects only the matching official artifact" {
+  load_macos_module
+  export TOOLCHAIN_ARCH=x86_64 TOOLCHAIN_DOCKER_FIXTURE="$DOCKER_FIXTURE"
+
+  run docker_macos_artifact
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Docker-Intel.dmg'* ]]
+  [[ "$output" != *'Docker-AppleSilicon.dmg'* ]]
+}
+
+@test "Docker install requires confirmation" {
+  load_macos_module
+
+  run install_macos_docker_desktop no
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"tool_id":"docker_desktop"'* ]]
+  [[ "$output" == *'"status":"skipped"'* ]]
+}
+
+@test "legacy docker-compose does not satisfy readiness" {
+  load_macos_module
+  docker() {
+    case "$*" in
+      version) return 0 ;;
+      'compose version') return 1 ;;
+      *) return 64 ;;
+    esac
+  }
+  docker-compose() { return 0; }
+
+  run verify_macos_docker
+
+  [ "$status" -ne 0 ]
+  [[ "$output" != *'command not found'* ]]
+}
+
+@test "Docker readiness verifies Docker Engine and Compose v2 only" {
+  load_macos_module
+  export TOOLCHAIN_DOCKER_LOG="$BATS_TEST_TMPDIR/docker-commands.log"
+  docker() {
+    printf '%s\n' "$*" >> "$TOOLCHAIN_DOCKER_LOG"
+    case "$*" in
+      version|'compose version') return 0 ;;
+      *) return 64 ;;
+    esac
+  }
+
+  run verify_macos_docker
+
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '1p' "$TOOLCHAIN_DOCKER_LOG")" = 'version' ]
+  [ "$(sed -n '2p' "$TOOLCHAIN_DOCKER_LOG")" = 'compose version' ]
+  [ "$(wc -l < "$TOOLCHAIN_DOCKER_LOG" | tr -d ' ')" -eq 2 ]
+}
+
+@test "Docker readiness timeout is bounded and truthful" {
+  load_macos_module
+  verify_macos_docker() { return 1; }
+
+  run wait_macos_docker_ready 1
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'"status":"failed"'* ]]
+}
+
+@test "Docker readiness rejects a timeout above two minutes" {
+  load_macos_module
+
+  run wait_macos_docker_ready 121
+
+  [ "$status" -eq 64 ]
+}
+
+@test "macOS Docker installer has no legacy Compose, login, or forced reboot commands" {
+  run grep -Eiq '(^|[^[:alnum:]_-])docker-compose([^[:alnum:]_-]|$)|docker[[:space:]]+login|restart[[:space:]_-]*(computer|mac)|shutdown' "$MODULE"
+
+  [ "$status" -eq 1 ]
 }

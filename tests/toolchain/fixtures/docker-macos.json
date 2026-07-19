@@ -1,0 +1,11 @@
+{
+  "arm64": {
+    "filename": "Docker-AppleSilicon.dmg",
+    "url": "https://desktop.docker.com/mac/main/arm64/226246/Docker.dmg"
+  },
+  "x86_64": {
+    "filename": "Docker-Intel.dmg",
+    "url": "https://desktop.docker.com/mac/main/amd64/226246/Docker.dmg"
+  },
+  "application_path": "/Applications/Docker.app"
+}
