@@ -4,6 +4,84 @@ param()
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Git 與 GitHub CLI 課程環境安裝程式"
 
+$InstallSupportBaseUrl = "https://gemini.printii.com/api/install-support"
+
+function Invoke-InstallSupportRequest {
+    param([hashtable]$Request)
+
+    $parameters = @{
+        Uri = $Request.Uri
+        Method = $Request.Method
+        Headers = $Request.Headers
+        ContentType = "application/json"
+        TimeoutSec = $Request.TimeoutSec
+    }
+    if ($null -ne $Request.Body) {
+        $parameters.Body = $Request.Body | ConvertTo-Json -Depth 8 -Compress
+    }
+    Invoke-RestMethod @parameters
+}
+
+function Get-InstallDiagnostics {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [string]$LastError = "",
+        [scriptblock]$CommandLookup = { param($name) $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
+    )
+
+    $safeError = $LastError -replace '(?i)C:\\Users\\[^\\\s]+', 'C:\Users\<USER>'
+    if ($safeError.Length -gt 4000) { $safeError = $safeError.Substring(0, 4000) }
+
+    [pscustomobject]@{
+        platform = "windows"
+        step = $Step
+        git_found = [bool](& $CommandLookup "git")
+        gh_found = [bool](& $CommandLookup "gh")
+        winget_available = [bool](& $CommandLookup "winget")
+        stderr = $safeError
+    }
+}
+
+function New-InstallSupportSession {
+    param(
+        [Parameter(Mandatory)][string]$InstallerVersion,
+        [scriptblock]$Transport = ${function:Invoke-InstallSupportRequest}
+    )
+
+    & $Transport @{
+        Uri = "$InstallSupportBaseUrl/sessions"
+        Method = "POST"
+        Headers = @{}
+        TimeoutSec = 20
+        Body = @{ platform = "windows"; installer_version = $InstallerVersion }
+    }
+}
+
+function Invoke-InstallDiagnosis {
+    param(
+        [Parameter(Mandatory)]$Session,
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)][ValidateRange(1, 15)][int]$Attempt,
+        [Parameter(Mandatory)]$Diagnostics,
+        $PreviousAction = $null,
+        [scriptblock]$Transport = ${function:Invoke-InstallSupportRequest}
+    )
+
+    & $Transport @{
+        Uri = "$InstallSupportBaseUrl/diagnose"
+        Method = "POST"
+        Headers = @{ Authorization = "Bearer $($Session.session_token)" }
+        TimeoutSec = 20
+        Body = @{
+            session_id = $Session.session_id
+            step = $Step
+            attempt = $Attempt
+            diagnostics = $Diagnostics
+            previous_action = $PreviousAction
+        }
+    }
+}
+
 function Write-Step([string]$Message) { Write-Host "`n▶ $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "  ✓ $Message" -ForegroundColor Green }
 function Write-WarnZh([string]$Message) { Write-Host "  ! $Message" -ForegroundColor Yellow }
