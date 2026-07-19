@@ -82,6 +82,79 @@ function Invoke-InstallDiagnosis {
     }
 }
 
+function Invoke-FixedInstallCommand {
+    param([string]$Command, [string[]]$Arguments)
+
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $process = Start-Process -FilePath $Command -ArgumentList $Arguments -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+        [pscustomobject]@{
+            exit_code = $process.ExitCode
+            stdout = Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue
+            stderr = Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue
+        }
+    } finally {
+        Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-AllowlistedInstallAction {
+    param(
+        [Parameter(Mandatory)][string]$ActionId,
+        [switch]$Confirmed,
+        [scriptblock]$CommandRunner = ${function:Invoke-FixedInstallCommand}
+    )
+
+    $definitions = @{
+        CHECK_GIT_VERSION = @{ command = 'git'; arguments = @('--version'); confirmation = $false }
+        CHECK_GH_VERSION = @{ command = 'gh'; arguments = @('--version'); confirmation = $false }
+        CHECK_WINGET_VERSION = @{ command = 'winget'; arguments = @('--version'); confirmation = $false }
+        CHECK_GITHUB_NETWORK = @{ command = 'curl.exe'; arguments = @('--head', '--max-time', '10', 'https://github.com'); confirmation = $false }
+        CHECK_RAW_GITHUB_NETWORK = @{ command = 'curl.exe'; arguments = @('--head', '--max-time', '10', 'https://raw.githubusercontent.com'); confirmation = $false }
+        CHECK_GH_AUTH_STATUS = @{ command = 'gh'; arguments = @('auth', 'status', '--hostname', 'github.com'); confirmation = $false }
+        CHECK_GIT_CREDENTIAL_HELPER = @{ command = 'git'; arguments = @('config', '--global', '--get-regexp', '^credential\..*\.helper$|^credential\.helper$'); confirmation = $false }
+        REFRESH_WINDOWS_PATH = @{ command = '__refresh_path__'; arguments = @(); confirmation = $true }
+        INSTALL_GIT_WINDOWS = @{ command = 'winget'; arguments = @('install', '--id', 'Git.Git', '--exact', '--source', 'winget', '--accept-source-agreements', '--accept-package-agreements'); confirmation = $true }
+        INSTALL_GH_WINDOWS = @{ command = 'winget'; arguments = @('install', '--id', 'GitHub.cli', '--exact', '--source', 'winget', '--accept-source-agreements', '--accept-package-agreements'); confirmation = $true }
+        GH_AUTH_LOGIN_WEB = @{ command = 'gh'; arguments = @('auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'); confirmation = $true }
+        GH_AUTH_SETUP_GIT = @{ command = 'gh'; arguments = @('auth', 'setup-git', '--hostname', 'github.com'); confirmation = $true }
+        GH_AUTH_SWITCH = @{ command = 'gh'; arguments = @('auth', 'switch', '--hostname', 'github.com'); confirmation = $true }
+        CLEAR_STALE_GITHUB_CREDENTIAL_WINDOWS = @{ command = 'cmdkey.exe'; arguments = @('/delete:LegacyGeneric:target=git:https://github.com'); confirmation = $true }
+        OPEN_WINDOWS_CREDENTIAL_MANAGER = @{ command = 'control.exe'; arguments = @('/name', 'Microsoft.CredentialManager'); confirmation = $false }
+        RESTART_TERMINAL_REQUIRED = @{ command = '__no_op__'; arguments = @(); confirmation = $true }
+        CONTACT_INSTRUCTOR = @{ command = '__no_op__'; arguments = @(); confirmation = $false }
+    }
+
+    $definition = $definitions[$ActionId]
+    if ($null -eq $definition) { throw "Unknown install support action: $ActionId" }
+    if ($definition.confirmation -and -not $Confirmed) {
+        return [pscustomobject]@{
+            action_id = $ActionId
+            exit_code = -1
+            stdout = ''
+            stderr = 'Explicit confirmation is required.'
+        }
+    }
+
+    if ($definition.command -eq '__refresh_path__') {
+        Refresh-Path
+        $commandResult = @{ exit_code = 0; stdout = 'Windows PATH refreshed.'; stderr = '' }
+    } elseif ($definition.command -eq '__no_op__') {
+        $commandResult = @{ exit_code = 0; stdout = ''; stderr = '' }
+    } else {
+        $commandResult = & $CommandRunner $definition.command ([string[]]$definition.arguments)
+    }
+
+    [pscustomobject]@{
+        action_id = $ActionId
+        exit_code = [int]$commandResult.exit_code
+        stdout = [string]$commandResult.stdout
+        stderr = [string]$commandResult.stderr
+    }
+}
+
 function Write-Step([string]$Message) { Write-Host "`n▶ $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "  ✓ $Message" -ForegroundColor Green }
 function Write-WarnZh([string]$Message) { Write-Host "  ! $Message" -ForegroundColor Yellow }

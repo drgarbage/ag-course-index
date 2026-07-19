@@ -46,3 +46,54 @@ Describe 'Install support diagnostics' {
         $result.action.id | Should -Be 'CHECK_GH_VERSION'
     }
 }
+
+Describe 'Windows install action allowlist' {
+    It 'rejects unknown actions without invoking a command' {
+        $script:commandCalls = 0
+        {
+            Invoke-AllowlistedInstallAction `
+                -ActionId 'RUN_ARBITRARY_COMMAND' `
+                -Confirmed:$true `
+                -CommandRunner { param($command, $arguments) $script:commandCalls++ }
+        } | Should -Throw '*Unknown install support action*'
+        $script:commandCalls | Should -Be 0
+    }
+
+    It 'does not run a state-changing action without confirmation' {
+        $script:commandCalls = 0
+        $result = Invoke-AllowlistedInstallAction `
+            -ActionId 'INSTALL_GH_WINDOWS' `
+            -Confirmed:$false `
+            -CommandRunner { param($command, $arguments) $script:commandCalls++ }
+
+        $result.action_id | Should -Be 'INSTALL_GH_WINDOWS'
+        $result.exit_code | Should -Be -1
+        $result.stderr | Should -Match 'confirmation'
+        $script:commandCalls | Should -Be 0
+    }
+
+    It 'maps an allowed action to fixed argv and ignores executable response fields' {
+        $script:capturedCommand = $null
+        $script:capturedArguments = $null
+        $response = @{ action = @{ id = 'CHECK_GH_VERSION'; command = 'touch /tmp/command-ran'; url = 'https://evil.invalid' } }
+
+        $result = Invoke-AllowlistedInstallAction `
+            -ActionId $response.action.id `
+            -CommandRunner {
+                param($command, $arguments)
+                $script:capturedCommand = $command
+                $script:capturedArguments = $arguments
+                @{ exit_code = 0; stdout = 'gh version fake'; stderr = '' }
+            }
+
+        $script:capturedCommand | Should -Be 'gh'
+        $script:capturedArguments | Should -Be @('--version')
+        $result.exit_code | Should -Be 0
+        $result.stdout | Should -Be 'gh version fake'
+    }
+
+    It 'contains no dynamic expression execution' {
+        $source = Get-Content $script:InstallerPath -Raw
+        $source | Should -Not -Match '(?im)\bInvoke-Expression\b|\biex\b'
+    }
+}
