@@ -93,11 +93,36 @@ Write-Ok "Git 身分與預設分支已設定"
 Write-Step "檢查 GitHub 登入"
 & gh auth status --hostname github.com *> $null
 if ($LASTEXITCODE -ne 0) {
-    Write-WarnZh "尚未登入、授權已失效，或舊憑證無法使用。接下來會開啟 GitHub 官方網頁。"
-    Write-Host "  請登入正確帳號並完成裝置授權；完成前不要關閉這個視窗。"
-    & gh auth login --hostname github.com --git-protocol https --web
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Zh "GitHub 網頁登入未完成。" "確認瀏覽器已完成授權，再重新執行本程式。若有多個帳號，先執行 gh auth switch。"
+    Write-WarnZh "尚未登入、授權已失效，或舊憑證無法使用。接下來會協助你登入 GitHub。"
+
+    $hasAccount = Read-Host "你是否已經有 GitHub 帳號？(Y/n，若不確定就按 Enter)"
+    if ($hasAccount -match '^(n|no|否)$') {
+        Write-Host "  尚未有帳號沒關係，先完成註冊再繼續。"
+        Write-Host "  即將開啟 GitHub 註冊頁面：https://github.com/signup"
+        Write-Host "  若你想直接用 Google／Gmail 帳號註冊，請在該頁面選擇「Continue with Google」，並完成畫面上要求的使用者名稱等設定。"
+        try { Start-Process "https://github.com/signup" } catch {}
+        Read-Host "完成註冊（包含設定使用者名稱）後，按 Enter 繼續"
+    }
+
+    $loggedIn = $false
+    $maxAttempts = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        Write-Host "  正在開啟 GitHub 網頁登入（第 $attempt/$maxAttempts 次）。請登入正確帳號並完成裝置授權；完成前不要關閉這個視窗。"
+        & gh auth login --hostname github.com --git-protocol https --web
+        if ($LASTEXITCODE -eq 0) {
+            $loggedIn = $true
+            break
+        }
+
+        Write-WarnZh "這次登入沒有成功。常見原因：註冊尚未完成（例如用 Google 登入後還沒設定 GitHub 使用者名稱）、瀏覽器分頁忘記按授權、或是等待逾時。"
+        if ($attempt -lt $maxAttempts) {
+            $retry = Read-Host "要再試一次嗎？(Y/n)"
+            if ($retry -match '^(n|no|否)$') { break }
+        }
+    }
+
+    if (-not $loggedIn) {
+        Stop-Zh "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱），再重新執行本程式。若有多個帳號，先執行 gh auth switch。"
     }
 } else {
     Write-Ok "GitHub CLI 已登入"

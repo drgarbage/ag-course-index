@@ -95,10 +95,34 @@ if gh auth status --hostname github.com >/dev/null 2>&1; then
   ok "GitHub CLI 已登入"
   gh auth status --hostname github.com
 else
-  warn "尚未登入、授權已失效，或系統鑰匙圈中的舊憑證無法使用。"
-  printf '  接下來會開啟 GitHub 官方網頁。請登入正確帳號並完成授權。\n'
-  gh auth login --hostname github.com --git-protocol https --web || \
-    fail "GitHub 網頁登入未完成。" "確認瀏覽器完成授權後重試。若鑰匙圈一直詢問密碼，請開啟「鑰匙圈存取」確認登入鑰匙圈已解鎖。"
+  warn "尚未登入、授權已失效，或系統鑰匙圈中的舊憑證無法使用。接下來會協助你登入 GitHub。"
+
+  read -r -p "你是否已經有 GitHub 帳號？(Y/n，若不確定就按 Enter)：" HAS_ACCOUNT
+  if printf '%s' "$HAS_ACCOUNT" | grep -Eiq '^(n|no|否)$'; then
+    printf '  尚未有帳號沒關係，先完成註冊再繼續。\n'
+    printf '  即將開啟 GitHub 註冊頁面：https://github.com/signup\n'
+    printf '  若你想直接用 Google／Gmail 帳號註冊，請在該頁面選擇「Continue with Google」，並完成畫面上要求的使用者名稱等設定。\n'
+    open "https://github.com/signup" >/dev/null 2>&1 || true
+    read -r -p "完成註冊（包含設定使用者名稱）後，按 Enter 繼續："
+  fi
+
+  LOGGED_IN=0
+  MAX_ATTEMPTS=3
+  for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+    printf '  正在開啟 GitHub 網頁登入（第 %s/%s 次）。請登入正確帳號並完成裝置授權；完成前不要關閉這個視窗。\n' "$ATTEMPT" "$MAX_ATTEMPTS"
+    if gh auth login --hostname github.com --git-protocol https --web; then
+      LOGGED_IN=1
+      break
+    fi
+    warn "這次登入沒有成功。常見原因：註冊尚未完成（例如用 Google 登入後還沒設定 GitHub 使用者名稱）、瀏覽器分頁忘記按授權、或是等待逾時。"
+    if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+      read -r -p "要再試一次嗎？(Y/n)：" RETRY
+      if printf '%s' "$RETRY" | grep -Eiq '^(n|no|否)$'; then break; fi
+    fi
+  done
+
+  [ "$LOGGED_IN" -eq 1 ] || \
+    fail "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱）。若鑰匙圈一直詢問密碼，請開啟「鑰匙圈存取」確認登入鑰匙圈已解鎖，再重新執行本程式。"
 fi
 
 step "讓 Git 使用 GitHub CLI 保存 HTTPS 憑證"
