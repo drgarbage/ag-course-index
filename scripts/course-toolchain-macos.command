@@ -118,5 +118,5 @@ install_course_toolchain_macos_gui_tool() {
 }
 
 render_course_toolchain_macos_readiness_report() {
-  render_toolchain_report "$1" "$2"
+  render_toolchain_report "$1" "$2" "${3:-}"
 }

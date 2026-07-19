@@ -160,6 +160,37 @@ Describe 'Course toolchain GUI and readiness report' {
         $report.tools.status | Should -Be @('installed', 'updated', 'needs_restart', 'failed', 'skipped')
     }
 
+    It 'rejects mixed-case statuses instead of accepting PowerShell casing' {
+        $report = New-ToolchainReport -Profile base -Results @(
+            @{ tool_id = 'git_gh'; status = 'INSTALLED' },
+            @{ tool_id = 'node_lts'; status = 'READY' }
+        )
+
+        $report.tools.status | Should -Be @('failed', 'failed')
+    }
+
+    It 'redacts quoted Windows profile names through the end of the safe line' {
+        $singleQuote = New-ToolchainReport -Profile base -Results @(
+            @{ tool_id = 'git_gh'; status = 'failed'; safe_message = "at C:\Users\O'Connor\Desktop\secret.txt suffix O'Connor" }
+        )
+        $doubleQuote = New-ToolchainReport -Profile base -Results @(
+            @{ tool_id = 'git_gh'; status = 'failed'; safe_message = 'at C:\Users\A"B\Desktop\secret.txt suffix A"B' }
+        )
+
+        $singleQuote.tools[0].safe_message | Should -Be 'at [USER_PATH]'
+        $doubleQuote.tools[0].safe_message | Should -Be 'at [USER_PATH]'
+    }
+
+    It 'forwards injected free bytes through the Windows course wrapper' {
+        $report = Get-CourseToolchainWindowsReadinessReport -Profile base -FreeBytes 1 -Results @(
+            @{ tool_id = 'git_gh'; status = 'installed' },
+            @{ tool_id = 'node_lts'; status = 'installed' }
+        )
+
+        $report.disk.free_bytes | Should -Be 1
+        $report.disk.status | Should -Be 'insufficient'
+    }
+
     It 'fails closed for non-string tool IDs and statuses' {
         $report = New-ToolchainReport -Profile base -Results @(
             @{ tool_id = @('git_gh'); status = 'ready' },

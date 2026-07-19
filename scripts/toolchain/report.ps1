@@ -22,8 +22,7 @@ function ConvertTo-ToolchainSafeText {
     $text = [string]$Value
     $text = $text -replace '(?i)\b(?:gh[pousr]_[A-Za-z0-9_-]+|(?:sk|pk)_[A-Za-z0-9_-]+)\b', '[REDACTED]'
     $text = $text -replace '(?i)\b(token|password|secret|api[_-]?key)\s*[:=]?\s*\S+', '$1 [REDACTED]'
-    $text = $text -replace '(?i)[A-Z]:\\Users\\[^\r\n"'']+', '[USER_PATH]'
-    $text = $text -replace '(?i)/(?:Users|home)/[^\r\n"'']+', '[USER_PATH]'
+    $text = $text -replace '(?im)(?:[A-Z]:\\Users\\|/(?:Users|home)/)[^\r\n]*', '[USER_PATH]'
     return $text
 }
 
@@ -80,8 +79,8 @@ function New-ToolchainReport {
             $property = $result.PSObject.Properties['status']
             if ($null -ne $property -and $property.Value -is [string]) { $status = $property.Value }
         }
-        if ($status -eq 'ready') { $status = 'installed' }
-        if ($status -notin $script:ToolchainReportStatuses) { $status = 'failed' }
+        if ($status -ceq 'ready') { $status = 'installed' }
+        if (-not ($script:ToolchainReportStatuses -ccontains $status)) { $status = 'failed' }
         $version = ''
         $message = if ($null -eq $result) { '未取得工具結果。' } else { Get-ToolchainResultValue -Result $result -Name 'safe_message' }
         if ($null -ne $result) {
@@ -108,7 +107,7 @@ function New-ToolchainReport {
         $parsedFreeBytes -ge 0
     $effectiveFreeBytes = if ($hasValidFreeBytes) { $parsedFreeBytes } else { $null }
     $diskStatus = if ($null -eq $effectiveFreeBytes) { 'unknown' } elseif ($effectiveFreeBytes -ge $requiredBytes) { 'enough' } else { 'insufficient' }
-    $toolsReady = @($requiredReports | Where-Object { $_.status -notin @('installed', 'updated') }).Count -eq 0
+    $toolsReady = @($requiredReports | Where-Object { -not (@('installed', 'updated') -ccontains $_.status) }).Count -eq 0
     $ready = $toolsReady -and $diskStatus -ne 'insufficient'
     $restartRequired = @($toolReports | Where-Object { $_.needs_restart }).Count -gt 0
     $nextStep = if ($diskStatus -eq 'insufficient') {

@@ -26,8 +26,7 @@ def safe_text(value):
     text = "" if value is None else str(value)
     text = re.sub(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_-]+|(?:sk|pk)_[A-Za-z0-9_-]+)\b", "[REDACTED]", text)
     text = re.sub(r"(?i)\b(token|password|secret|api[_-]?key)\s*[:=]?\s*\S+", r"\1 [REDACTED]", text)
-    text = re.sub(r'''(?i)[A-Z]:\\Users\\[^\r\n"']+''', "[USER_PATH]", text)
-    return re.sub(r'''(?i)/(?:Users|home)/[^\r\n"']+''', "[USER_PATH]", text)
+    return re.sub(r"(?im)(?:[A-Z]:\\Users\\|/(?:Users|home)/)[^\r\n]*", "[USER_PATH]", text)
 
 profile = sys.argv[1]
 if profile not in PROFILES:

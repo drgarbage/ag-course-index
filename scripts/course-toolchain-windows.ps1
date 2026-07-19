@@ -145,8 +145,9 @@ function Install-CourseToolchainWindowsGuiTool {
 function Get-CourseToolchainWindowsReadinessReport {
     param(
         [Parameter(Mandatory)][ValidateSet('base', 'line', 'data', 'full')][string]$Profile,
-        [Parameter(Mandatory)][object[]]$Results
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
+        [AllowNull()][object]$FreeBytes = $null
     )
 
-    New-ToolchainReport -Profile $Profile -Results $Results
+    New-ToolchainReport -Profile $Profile -Results $Results -FreeBytes $FreeBytes
 }

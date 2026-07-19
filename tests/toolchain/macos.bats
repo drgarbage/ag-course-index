@@ -91,6 +91,31 @@ setup() {
   [ "$output" = 'installed,updated,needs_restart,failed,skipped' ]
 }
 
+@test "readiness report rejects mixed-case statuses" {
+  run render_toolchain_report base '[{"tool_id":"git_gh","status":"INSTALLED"},{"tool_id":"node_lts","status":"READY"}]'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | grep -o '"status":"failed"' | wc -l | tr -d ' ')" -eq 2 ]
+}
+
+@test "readiness report redacts quoted macOS profile names through the safe line" {
+  run render_toolchain_report base "[{\"tool_id\":\"git_gh\",\"status\":\"failed\",\"safe_message\":\"at /Users/O'Connor/Desktop/secret.txt suffix O'Connor\"}]"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"safe_message":"at [USER_PATH]"'* ]]
+  [[ "$output" != *Connor* ]]
+
+  run render_toolchain_report base '[{"tool_id":"git_gh","status":"failed","safe_message":"at /Users/A\"B/Desktop/secret.txt suffix A\"B"}]'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"safe_message":"at [USER_PATH]"'* ]]
+  [[ "$output" != *'A\"B'* ]]
+}
+
+@test "course wrapper forwards injected free bytes" {
+  run render_course_toolchain_macos_readiness_report base '[{"tool_id":"git_gh","status":"installed"},{"tool_id":"node_lts","status":"installed"}]' 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"free_bytes":1'* ]]
+  [[ "$output" == *'"status":"insufficient"'* ]]
+}
+
 @test "readiness report fails closed for non-string tool IDs and statuses" {
   run render_toolchain_report base '[{"tool_id":["git_gh"],"status":"ready"},{"tool_id":"node_lts","status":{"value":"ready"}}]'
   [ "$status" -eq 0 ]
