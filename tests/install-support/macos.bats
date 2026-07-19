@@ -82,3 +82,47 @@ STUB
   run grep -E '(^|[;&|[:space:]])eval([;&|[:space:]]|$)' "$INSTALLER"
   [ "$status" -eq 1 ]
 }
+
+@test "declining optional AI creates no session" {
+  install_support_consent() { printf 'no'; }
+  new_install_support_session() { touch "$INSTALL_SUPPORT_SESSION_LOG"; }
+  export -f install_support_consent new_install_support_session
+  export INSTALL_SUPPORT_SESSION_LOG="$BATS_TEST_TMPDIR/session.log"
+
+  run handle_install_failure github_auth '{}'
+  [ "$status" -eq 3 ]
+  [ ! -e "$INSTALL_SUPPORT_SESSION_LOG" ]
+}
+
+@test "existing static failure handler offers optional AI recovery" {
+  run awk '/^fail\(\)/,/^}/' "$INSTALLER"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'handle_install_failure'* ]]
+}
+
+@test "offline API keeps the static fallback" {
+  install_support_consent() { printf 'yes'; }
+  new_install_support_session() { return 7; }
+  export -f install_support_consent new_install_support_session
+
+  run handle_install_failure github_auth '{}'
+  [ "$status" -eq 4 ]
+  [[ "$output" == *'原本的靜態排錯說明仍然有效'* ]]
+}
+
+@test "AI recovery stops after fifteen diagnosis requests" {
+  install_support_consent() { printf 'yes'; }
+  new_install_support_session() { printf '{"session_id":"is_fake","session_token":"signed-fake"}'; }
+  invoke_install_diagnosis() {
+    printf 'call\n' >> "$INSTALL_SUPPORT_DIAGNOSIS_LOG"
+    printf '{"action":{"id":"CHECK_GH_VERSION","requires_confirmation":false},"resolved":false,"support_code":"SUP-LIMIT2"}'
+  }
+  run_allowlisted_action() { return 1; }
+  export -f install_support_consent new_install_support_session invoke_install_diagnosis run_allowlisted_action
+  export INSTALL_SUPPORT_DIAGNOSIS_LOG="$BATS_TEST_TMPDIR/diagnosis.log"
+
+  run handle_install_failure github_auth '{}'
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$INSTALL_SUPPORT_DIAGNOSIS_LOG" | tr -d ' ')" -eq 15 ]
+  [[ "$output" == *'SUP-LIMIT2'* ]]
+}

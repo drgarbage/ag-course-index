@@ -155,12 +155,92 @@ function Invoke-AllowlistedInstallAction {
     }
 }
 
+function Invoke-OptionalInstallSupport {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)]$Diagnostics,
+        [string]$InstallerVersion = '1.0.0',
+        [scriptblock]$ConsentProvider = { Read-Host '是否使用 AI 安裝助理？(y/N)' },
+        [scriptblock]$ConfirmationProvider = { Read-Host '是否執行上述動作？(y/N)' },
+        [scriptblock]$SessionFactory = { param($version) New-InstallSupportSession -InstallerVersion $version },
+        [scriptblock]$DiagnosisProvider = {
+            param($session, $supportStep, $attempt, $safeDiagnostics, $previousAction)
+            Invoke-InstallDiagnosis -Session $session -Step $supportStep -Attempt $attempt `
+                -Diagnostics $safeDiagnostics -PreviousAction $previousAction
+        },
+        [scriptblock]$ActionRunner = {
+            param($actionId, $confirmed)
+            Invoke-AllowlistedInstallAction -ActionId $actionId -Confirmed:$confirmed
+        },
+        [scriptblock]$OutputWriter = { param($message) Write-Host $message }
+    )
+
+    if ((& $ConsentProvider) -notmatch '^(?i:y|yes)$') {
+        return [pscustomobject]@{ status = 'declined'; support_code = $null }
+    }
+
+    try {
+        $session = & $SessionFactory $InstallerVersion
+        $previousAction = $null
+        $supportCode = $null
+        for ($attempt = 1; $attempt -le 15; $attempt++) {
+            $diagnosis = & $DiagnosisProvider $session $Step $attempt $Diagnostics $previousAction
+            if ($diagnosis.support_code) { $supportCode = $diagnosis.support_code }
+            if ($diagnosis.summary) { & $OutputWriter ([string]$diagnosis.summary) }
+            if ($diagnosis.explanation) { & $OutputWriter ([string]$diagnosis.explanation) }
+            if ($diagnosis.resolved) {
+                return [pscustomobject]@{ status = 'resolved'; support_code = $supportCode }
+            }
+
+            $action = $diagnosis.action
+            if (-not $action -or -not $action.id) {
+                return [pscustomobject]@{ status = 'fallback'; support_code = $supportCode }
+            }
+            if ($action.title) { & $OutputWriter ([string]$action.title) }
+            if ($action.impact) { & $OutputWriter ([string]$action.impact) }
+            if ($action.id -eq 'CONTACT_INSTRUCTOR') {
+                return [pscustomobject]@{ status = 'contact'; support_code = $supportCode }
+            }
+
+            $confirmed = $true
+            if ($action.requires_confirmation) {
+                $confirmed = ((& $ConfirmationProvider) -match '^(?i:y|yes)$')
+                if (-not $confirmed) {
+                    return [pscustomobject]@{ status = 'action_declined'; support_code = $supportCode }
+                }
+            }
+            $actionResult = & $ActionRunner ([string]$action.id) $confirmed
+            $previousAction = @{
+                action_id = [string]$actionResult.action_id
+                exit_code = [int]$actionResult.exit_code
+                succeeded = ([int]$actionResult.exit_code -eq 0)
+            }
+        }
+        [pscustomobject]@{ status = 'limit'; support_code = $supportCode }
+    } catch {
+        [pscustomobject]@{ status = 'fallback'; support_code = $null }
+    }
+}
+
 function Write-Step([string]$Message) { Write-Host "`n▶ $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "  ✓ $Message" -ForegroundColor Green }
 function Write-WarnZh([string]$Message) { Write-Host "  ! $Message" -ForegroundColor Yellow }
-function Stop-Zh([string]$Message, [string]$Suggestion) {
+function Stop-Zh(
+    [string]$Message,
+    [string]$Suggestion,
+    [string]$Step = 'final_verification'
+) {
     Write-Host "`n安裝未完成：$Message" -ForegroundColor Red
     Write-Host "建議處理方式：$Suggestion" -ForegroundColor Yellow
+    $diagnostics = Get-InstallDiagnostics -Step $Step -LastError $Message
+    $recovery = Invoke-OptionalInstallSupport -Step $Step -Diagnostics $diagnostics
+    if ($recovery.status -eq 'resolved') {
+        Write-Ok 'AI 安裝助理已完成排錯。'
+        exit 0
+    }
+    if ($recovery.support_code) {
+        Write-Host "支援碼：$($recovery.support_code)" -ForegroundColor Yellow
+    }
     Read-Host "按 Enter 結束"
     exit 1
 }

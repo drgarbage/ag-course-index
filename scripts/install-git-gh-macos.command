@@ -8,6 +8,12 @@ warn() { printf '  \033[33m! %s\033[0m\n' "$1"; }
 fail() {
   printf '\n\033[31m安裝未完成：%s\033[0m\n' "$1"
   printf '\033[33m建議處理方式：%s\033[0m\n' "$2"
+  local diagnostics
+  diagnostics="$(collect_install_diagnostics "${3:-final_verification}" "$1")"
+  if handle_install_failure "${3:-final_verification}" "$diagnostics"; then
+    ok 'AI 安裝助理已完成排錯。'
+    exit 0
+  fi
   read -r -p "按 Enter 結束"
   exit 1
 }
@@ -17,6 +23,14 @@ INSTALL_SUPPORT_BASE_URL="https://gemini.printii.com/api/install-support"
 
 json_field() {
   python3 -c 'import json,sys; value=json.loads(sys.argv[1]); print(value.get(sys.argv[2], ""))' "$1" "$2"
+}
+
+json_path() {
+  python3 -c 'import json,sys
+value=json.loads(sys.argv[1])
+for key in sys.argv[2].split("."):
+    value=value.get(key, "") if isinstance(value, dict) else ""
+print(str(value).lower() if isinstance(value, bool) else value)' "$1" "$2"
 }
 
 collect_install_diagnostics() {
@@ -115,6 +129,71 @@ run_allowlisted_action() {
     __install_gh__) install_support_install_gh ;;
     *) install_support_run_command "$@" ;;
   esac
+}
+
+install_support_consent() {
+  local answer
+  read -r -p '是否使用 AI 安裝助理？(y/N)：' answer
+  printf '%s' "$answer"
+}
+
+install_support_confirmation() {
+  local answer
+  read -r -p '是否執行上述動作？(y/N)：' answer
+  printf '%s' "$answer"
+}
+
+handle_install_failure() {
+  local support_step="$1" diagnostics="$2"
+  local consent session_json session_id session_token previous_action=null support_code=''
+  consent="$(install_support_consent)"
+  case "$consent" in y|Y|yes|YES) ;; *) return 3 ;; esac
+
+  if ! session_json="$(new_install_support_session '1.0.0')"; then
+    printf 'AI 診斷目前無法連線；原本的靜態排錯說明仍然有效。\n'
+    return 4
+  fi
+  session_id="$(json_field "$session_json" session_id)"
+  session_token="$(json_field "$session_json" session_token)"
+  [ -n "$session_id" ] && [ -n "$session_token" ] || {
+    printf 'AI 診斷回應格式錯誤；原本的靜態排錯說明仍然有效。\n'
+    return 4
+  }
+
+  local attempt diagnosis action_id requires_confirmation confirmation exit_code
+  for attempt in $(seq 1 15); do
+    if ! diagnosis="$(invoke_install_diagnosis "$session_id" "$session_token" "$support_step" "$attempt" "$diagnostics" "$previous_action")"; then
+      printf 'AI 診斷目前無法連線；原本的靜態排錯說明仍然有效。\n'
+      return 4
+    fi
+    support_code="$(json_field "$diagnosis" support_code)"
+    [ -n "$(json_field "$diagnosis" summary)" ] && printf '%s\n' "$(json_field "$diagnosis" summary)"
+    [ -n "$(json_field "$diagnosis" explanation)" ] && printf '%s\n' "$(json_field "$diagnosis" explanation)"
+    [ "$(json_field "$diagnosis" resolved)" = true ] && return 0
+
+    action_id="$(json_path "$diagnosis" action.id)"
+    [ -n "$action_id" ] || {
+      printf 'AI 診斷回應格式錯誤；原本的靜態排錯說明仍然有效。\n'
+      return 4
+    }
+    [ "$action_id" = CONTACT_INSTRUCTOR ] && {
+      printf '請將支援碼 %s 提供給講師。\n' "$support_code"
+      return 6
+    }
+    requires_confirmation="$(json_path "$diagnosis" action.requires_confirmation)"
+    confirmation=no
+    if [ "$requires_confirmation" = true ]; then
+      confirmation="$(install_support_confirmation)"
+      case "$confirmation" in y|Y|yes|YES) confirmation=yes ;; *) return 3 ;; esac
+    fi
+
+    if run_allowlisted_action "$action_id" "$confirmation"; then exit_code=0; else exit_code=$?; fi
+    previous_action="$(python3 -c 'import json,sys; print(json.dumps({
+      "action_id":sys.argv[1], "exit_code":int(sys.argv[2]), "succeeded":int(sys.argv[2]) == 0
+    }, separators=(",", ":")))' "$action_id" "$exit_code")"
+  done
+  printf '已達診斷次數上限，請將支援碼 %s 提供給講師。\n' "$support_code"
+  return 5
 }
 
 printf '\033[1mGit 與 GitHub CLI 課程環境安裝程式\033[0m\n'

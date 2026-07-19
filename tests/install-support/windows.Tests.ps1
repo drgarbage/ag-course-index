@@ -97,3 +97,78 @@ Describe 'Windows install action allowlist' {
         $source | Should -Not -Match '(?im)\bInvoke-Expression\b|\biex\b'
     }
 }
+
+Describe 'Optional Windows AI recovery flow' {
+    It 'is connected to the existing static failure handler' {
+        $source = Get-Content $script:InstallerPath -Raw
+        $source | Should -Match '(?s)function Stop-Zh.*Invoke-OptionalInstallSupport'
+    }
+
+    It 'does not create a session when the user declines' {
+        $script:sessionCalls = 0
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'github_auth' -Diagnostics @{} `
+            -ConsentProvider { 'n' } `
+            -SessionFactory { $script:sessionCalls++ }
+
+        $result.status | Should -Be 'declined'
+        $script:sessionCalls | Should -Be 0
+    }
+
+    It 'keeps the static fallback when the API is offline' {
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'github_auth' -Diagnostics @{} `
+            -ConsentProvider { 'y' } `
+            -SessionFactory { @{ session_id = 'is_fake'; session_token = 'signed-fake' } } `
+            -DiagnosisProvider { throw 'offline' }
+
+        $result.status | Should -Be 'fallback'
+        $result.support_code | Should -BeNullOrEmpty
+    }
+
+    It 'requires confirmation and returns action feedback on the next request' {
+        $script:requests = [System.Collections.Generic.List[object]]::new()
+        $script:actionCalls = 0
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'github_auth' -Diagnostics @{} `
+            -ConsentProvider { 'y' } `
+            -ConfirmationProvider { 'y' } `
+            -SessionFactory { @{ session_id = 'is_fake'; session_token = 'signed-fake' } } `
+            -DiagnosisProvider {
+                param($session, $step, $attempt, $diagnostics, $previousAction)
+                $script:requests.Add([pscustomobject]@{ attempt = $attempt; previous = $previousAction })
+                if ($attempt -eq 1) {
+                    return @{ action = @{ id = 'GH_AUTH_SETUP_GIT'; requires_confirmation = $true }; resolved = $false; support_code = 'SUP-FAKE03' }
+                }
+                return @{ action = @{ id = 'CONTACT_INSTRUCTOR'; requires_confirmation = $false }; resolved = $true; support_code = 'SUP-FAKE03' }
+            } `
+            -ActionRunner {
+                param($actionId, $confirmed)
+                $script:actionCalls++
+                @{ action_id = $actionId; exit_code = 0; stdout = ''; stderr = '' }
+            }
+
+        $script:actionCalls | Should -Be 1
+        $script:requests.Count | Should -Be 2
+        $script:requests[1].previous.action_id | Should -Be 'GH_AUTH_SETUP_GIT'
+        $script:requests[1].previous.succeeded | Should -BeTrue
+        $result.status | Should -Be 'resolved'
+    }
+
+    It 'stops after fifteen diagnosis requests' {
+        $script:diagnosisCalls = 0
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'github_auth' -Diagnostics @{} `
+            -ConsentProvider { 'y' } `
+            -SessionFactory { @{ session_id = 'is_fake'; session_token = 'signed-fake' } } `
+            -DiagnosisProvider {
+                $script:diagnosisCalls++
+                @{ action = @{ id = 'CHECK_GH_VERSION'; requires_confirmation = $false }; resolved = $false; support_code = 'SUP-LIMIT1' }
+            } `
+            -ActionRunner { param($actionId, $confirmed) @{ action_id = $actionId; exit_code = 1; stdout = ''; stderr = 'still failing' } }
+
+        $script:diagnosisCalls | Should -Be 15
+        $result.status | Should -Be 'limit'
+        $result.support_code | Should -Be 'SUP-LIMIT1'
+    }
+}
