@@ -13,6 +13,110 @@ fail() {
 }
 has_command() { command -v "$1" >/dev/null 2>&1; }
 
+INSTALL_SUPPORT_BASE_URL="https://gemini.printii.com/api/install-support"
+
+json_field() {
+  python3 -c 'import json,sys; value=json.loads(sys.argv[1]); print(value.get(sys.argv[2], ""))' "$1" "$2"
+}
+
+collect_install_diagnostics() {
+  local support_step="$1"
+  local last_error="${2:-}"
+  local safe_error
+  safe_error="$(printf '%s' "$last_error" | sed -E 's#/Users/[^/[:space:]]+#/Users/<USER>#g' | cut -c 1-4000)"
+  local git_found=false gh_found=false xcode_tools_found=false
+  has_command git && git_found=true
+  has_command gh && gh_found=true
+  xcode-select -p >/dev/null 2>&1 && xcode_tools_found=true
+  python3 -c 'import json,sys; print(json.dumps({
+    "platform":"macos", "step":sys.argv[1],
+    "git_found":sys.argv[2] == "true", "gh_found":sys.argv[3] == "true",
+    "xcode_tools_found":sys.argv[4] == "true", "stderr":sys.argv[5]
+  }, separators=(",", ":")))' \
+    "$support_step" "$git_found" "$gh_found" "$xcode_tools_found" "$safe_error"
+}
+
+new_install_support_session() {
+  local installer_version="$1"
+  local body
+  body="$(python3 -c 'import json,sys; print(json.dumps({"platform":"macos","installer_version":sys.argv[1]}, separators=(",", ":")))' "$installer_version")"
+  curl --fail-with-body --silent --show-error --connect-timeout 5 --max-time 20 \
+    -X POST -H 'Content-Type: application/json' --data "$body" \
+    "$INSTALL_SUPPORT_BASE_URL/sessions"
+}
+
+invoke_install_diagnosis() {
+  local session_id="$1" session_token="$2" support_step="$3" attempt="$4" diagnostics="$5"
+  local previous_action="${6:-null}"
+  local body
+  body="$(python3 -c 'import json,sys; print(json.dumps({
+    "session_id":sys.argv[1], "step":sys.argv[2], "attempt":int(sys.argv[3]),
+    "diagnostics":json.loads(sys.argv[4]), "previous_action":json.loads(sys.argv[5])
+  }, separators=(",", ":")))' "$session_id" "$support_step" "$attempt" "$diagnostics" "$previous_action")"
+  curl --fail-with-body --silent --show-error --connect-timeout 5 --max-time 20 \
+    -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $session_token" \
+    --data "$body" "$INSTALL_SUPPORT_BASE_URL/diagnose"
+}
+
+install_support_run_command() { command "$@"; }
+
+install_support_install_gh() {
+  local release_json gh_url temp_dir gh_binary architecture
+  case "$(uname -m)" in arm64) architecture=arm64 ;; x86_64) architecture=amd64 ;; *) return 65 ;; esac
+  release_json="$(curl --fail-with-body --silent --show-error --connect-timeout 5 --max-time 20 \
+    https://api.github.com/repos/cli/cli/releases/latest)" || return
+  gh_url="$(printf '%s' "$release_json" | python3 -c 'import json,sys
+arch=sys.argv[1]
+for asset in json.load(sys.stdin).get("assets", []):
+    url=asset.get("browser_download_url", "")
+    if url.endswith("_macOS_" + arch + ".zip"):
+        print(url); break' "$architecture")"
+  [ -n "$gh_url" ] || return 65
+  temp_dir="$(mktemp -d)" || return
+  curl --fail-with-body --silent --show-error --connect-timeout 5 --max-time 20 \
+    "$gh_url" -o "$temp_dir/gh.zip" || { rm -rf "$temp_dir"; return 1; }
+  unzip -q "$temp_dir/gh.zip" -d "$temp_dir/unpacked" || { rm -rf "$temp_dir"; return 1; }
+  gh_binary="$(find "$temp_dir/unpacked" -type f -path '*/bin/gh' -print -quit)"
+  [ -n "$gh_binary" ] || { rm -rf "$temp_dir"; return 65; }
+  mkdir -p "$HOME/.local/bin" && cp "$gh_binary" "$HOME/.local/bin/gh" && chmod 755 "$HOME/.local/bin/gh"
+  local result=$?
+  rm -rf "$temp_dir"
+  return "$result"
+}
+
+run_allowlisted_action() {
+  local action_id="$1" confirmation="${2:-no}"
+  local requires_confirmation=false
+  case "$action_id" in
+    CHECK_GIT_VERSION) set -- git --version ;;
+    CHECK_GH_VERSION) set -- gh --version ;;
+    CHECK_XCODE_TOOLS) set -- xcode-select -p ;;
+    CHECK_GITHUB_NETWORK) set -- curl --head --max-time 10 https://github.com ;;
+    CHECK_RAW_GITHUB_NETWORK) set -- curl --head --max-time 10 https://raw.githubusercontent.com ;;
+    CHECK_GH_AUTH_STATUS) set -- gh auth status --hostname github.com ;;
+    CHECK_GIT_CREDENTIAL_HELPER) set -- git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' ;;
+    OPEN_MACOS_KEYCHAIN_ACCESS) set -- open -a 'Keychain Access' ;;
+    CONTACT_INSTRUCTOR) set -- __no_op__ ;;
+    INSTALL_XCODE_TOOLS_MACOS) requires_confirmation=true; set -- xcode-select --install ;;
+    INSTALL_GH_MACOS) requires_confirmation=true; set -- __install_gh__ ;;
+    GH_AUTH_LOGIN_WEB) requires_confirmation=true; set -- gh auth login --hostname github.com --git-protocol https --web ;;
+    GH_AUTH_SETUP_GIT) requires_confirmation=true; set -- gh auth setup-git --hostname github.com ;;
+    GH_AUTH_SWITCH) requires_confirmation=true; set -- gh auth switch --hostname github.com ;;
+    CLEAR_STALE_GITHUB_CREDENTIAL_MACOS) requires_confirmation=true; set -- security delete-internet-password -s github.com ;;
+    RESTART_TERMINAL_REQUIRED) requires_confirmation=true; set -- __no_op__ ;;
+    *) printf 'Unknown install support action: %s\n' "$action_id" >&2; return 64 ;;
+  esac
+  if [ "$requires_confirmation" = true ] && [ "$confirmation" != yes ]; then
+    printf 'Explicit confirmation is required.\n' >&2
+    return 2
+  fi
+  case "$1" in
+    __no_op__) return 0 ;;
+    __install_gh__) install_support_install_gh ;;
+    *) install_support_run_command "$@" ;;
+  esac
+}
+
 printf '\033[1mGit 與 GitHub CLI 課程環境安裝程式\033[0m\n'
 printf '程式只會安裝官方工具、設定 Git，並開啟 GitHub 官方登入頁。\n'
 
