@@ -13,6 +13,10 @@ MACOS_DOCKER_ARM64_SHA256='5f08b5e3e7e33cca7c364a585b15bcea4947159606453095a8a09
 MACOS_DOCKER_X86_64_FILENAME='Docker-Intel.dmg'
 MACOS_DOCKER_X86_64_URL='https://desktop.docker.com/mac/main/amd64/226246/Docker.dmg'
 MACOS_DOCKER_X86_64_SHA256='a88a63b4c74d5e85c9d41ec9b4065472b8812c0e3dfb63e31fdda3d3b1268a8b'
+MACOS_ANTIGRAVITY_APP_PATH='/Applications/Antigravity.app'
+MACOS_VSCODE_APP_PATH='/Applications/Visual Studio Code.app'
+MACOS_CHROME_APP_PATH='/Applications/Google Chrome.app'
+MACOS_EDGE_APP_PATH='/Applications/Microsoft Edge.app'
 
 macos_json_state() {
   python3 - "$1" "$2" "${3:-}" <<'PY'
@@ -219,6 +223,50 @@ install_macos_tool() {
     *'"status":"missing"'*) macos_json_state "$tool_id" needs_restart ;;
     *) macos_json_state "$tool_id" failed; return 1 ;;
   esac
+}
+
+macos_gui_cask() {
+  case "$1" in
+    antigravity) printf '%s\n' 'antigravity' ;;
+    vscode) printf '%s\n' 'visual-studio-code' ;;
+    browser) printf '%s\n' 'google-chrome' ;;
+    *) return 64 ;;
+  esac
+}
+
+macos_gui_ready() {
+  case "$1" in
+    antigravity) [ -d "$MACOS_ANTIGRAVITY_APP_PATH" ] ;;
+    vscode) [ -d "$MACOS_VSCODE_APP_PATH" ] ;;
+    browser) [ -d "$MACOS_CHROME_APP_PATH" ] || [ -d "$MACOS_EDGE_APP_PATH" ] ;;
+    *) return 64 ;;
+  esac
+}
+
+install_macos_gui_tool() {
+  local tool_id="$1" confirmation="$2" cask
+  cask="$(macos_gui_cask "$tool_id")" || { macos_json_state "$tool_id" failed; return 64; }
+  if [ "$confirmation" != yes ]; then
+    macos_json_state "$tool_id" skipped
+    return 2
+  fi
+  if macos_gui_ready "$tool_id"; then
+    macos_json_state "$tool_id" installed
+    return 0
+  fi
+  if ! macos_has_homebrew || ! brew --version >/dev/null 2>&1; then
+    macos_json_state "$tool_id" failed
+    return 1
+  fi
+  if ! brew install --cask "$cask"; then
+    macos_json_state "$tool_id" failed
+    return 1
+  fi
+  if macos_gui_ready "$tool_id"; then
+    macos_json_state "$tool_id" installed
+  else
+    macos_json_state "$tool_id" needs_restart
+  fi
 }
 
 docker_macos_artifact() {

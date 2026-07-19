@@ -2,6 +2,8 @@
 
 # shellcheck source=toolchain/macos.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/toolchain/macos.sh"
+# shellcheck source=toolchain/report.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/toolchain/report.sh"
 
 course_toolchain_catalog_path() {
   if [ -n "${COURSE_TOOLCHAIN_CATALOG:-}" ]; then
@@ -97,4 +99,24 @@ install_course_toolchain_macos_docker_desktop() {
     y|Y|yes|YES) install_macos_docker_desktop yes ;;
     *) install_macos_docker_desktop no ;;
   esac
+}
+
+install_course_toolchain_macos_gui_tool() {
+  local tool_id="$1" confirmation="${2:-}"
+  case "$tool_id" in
+    antigravity|vscode|browser) ;;
+    *) return 64 ;;
+  esac
+  if [ -z "$confirmation" ]; then
+    printf '%s' "$tool_id will be installed only after confirmation. Continue? [y/N] " >&2
+    read -r confirmation
+  fi
+  case "$confirmation" in
+    y|Y|yes|YES) install_macos_gui_tool "$tool_id" yes ;;
+    *) install_macos_gui_tool "$tool_id" no ;;
+  esac
+}
+
+render_course_toolchain_macos_readiness_report() {
+  render_toolchain_report "$1" "$2"
 }

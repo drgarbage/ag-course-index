@@ -3,10 +3,38 @@
 setup() {
   PLANNER="$BATS_TEST_DIRNAME/../../scripts/course-toolchain-macos.command"
   MODULE="$BATS_TEST_DIRNAME/../../scripts/toolchain/macos.sh"
+  REPORT="$BATS_TEST_DIRNAME/../../scripts/toolchain/report.sh"
   FIXTURE="$BATS_TEST_DIRNAME/fixtures/macos-tools.json"
   DOCKER_FIXTURE="$BATS_TEST_DIRNAME/fixtures/docker-macos.json"
   # shellcheck disable=SC1090
   source "$PLANNER"
+  source "$REPORT"
+}
+
+@test "GUI tools are not part of a profile unless explicitly selected" {
+  run get_course_toolchain_plan full ''
+  [ "$status" -eq 0 ]
+  [[ "$output" != *$'\nvscode'* ]]
+}
+
+@test "macOS GUI installer requires confirmation" {
+  load_macos_module
+  run install_macos_gui_tool vscode no
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"status":"skipped"'* ]]
+}
+
+@test "readiness report is unready when a required tool fails" {
+  run render_toolchain_report line '[{"tool_id":"cloudflared","status":"failed"}]'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ready":false'* ]]
+}
+
+@test "readiness report redacts tokens and personal paths" {
+  run render_toolchain_report base '[{"safe_message":"token ghp_fake at /Users/alice"}]'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *ghp_fake* ]]
+  [[ "$output" != *alice* ]]
 }
 
 load_macos_module() {

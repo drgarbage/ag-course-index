@@ -6,6 +6,8 @@ $ErrorActionPreference = 'Stop'
 
 $script:CourseToolchainWindowsModulePath = Join-Path $PSScriptRoot 'toolchain/windows.ps1'
 . $script:CourseToolchainWindowsModulePath
+$script:CourseToolchainReportModulePath = Join-Path $PSScriptRoot 'toolchain/report.ps1'
+. $script:CourseToolchainReportModulePath
 
 $script:CourseToolchainCatalogPath = Join-Path $PSScriptRoot 'toolchain/catalog.json'
 $script:CourseToolchainToolIds = @(
@@ -124,4 +126,27 @@ function Install-CourseToolchainWindowsDockerDesktop {
     Write-Host 'Impact: Docker Desktop installs Docker Desktop and starts its official application.'
     $dockerConfirmed = [bool](& $ConfirmationProvider 'Install Docker Desktop')
     Install-WindowsDockerDesktop -Confirmed:$dockerConfirmed -WslChangeConfirmed:$wslChangeConfirmed -PrerequisiteProvider $PrerequisiteProvider
+}
+
+function Install-CourseToolchainWindowsGuiTool {
+    param(
+        [Parameter(Mandatory)][ValidateSet('antigravity', 'vscode', 'browser')][string]$ToolId,
+        [scriptblock]$ConfirmationProvider = {
+            param($message)
+            (Read-Host "$message [y/N]") -match '^(?i:y|yes)$'
+        }
+    )
+
+    Write-Host "Impact: $ToolId will be installed from its fixed WinGet package ID; no GUI application will be started."
+    $confirmed = [bool](& $ConfirmationProvider "Install $ToolId")
+    Invoke-WindowsGuiToolInstall -ToolId $ToolId -Confirmed:$confirmed
+}
+
+function Get-CourseToolchainWindowsReadinessReport {
+    param(
+        [Parameter(Mandatory)][ValidateSet('base', 'line', 'data', 'full')][string]$Profile,
+        [Parameter(Mandatory)][object[]]$Results
+    )
+
+    New-ToolchainReport -Profile $Profile -Results $Results
 }

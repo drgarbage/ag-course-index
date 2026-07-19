@@ -4,6 +4,11 @@ $script:WindowsPackageCatalog = @{
     node_lts = @{ id = 'OpenJS.NodeJS.LTS'; verify = @('node', '--version'); minimum_version = '24.4.0' }
     cloudflared = @{ id = 'Cloudflare.cloudflared'; verify = @('cloudflared', '--version') }
 }
+$script:WindowsGuiPackageCatalog = @{
+    antigravity = @{ id = 'Google.Antigravity' }
+    vscode = @{ id = 'Microsoft.VisualStudioCode' }
+    browser = @{ id = 'Google.Chrome' }
+}
 $script:WindowsDockerDesktopPackageId = 'Docker.DockerDesktop'
 $script:WindowsDockerDesktopPath = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
 $script:WindowsDockerDesktopWingetArguments = @(
@@ -17,6 +22,37 @@ function Get-WindowsToolDefinition {
     $definition = $script:WindowsPackageCatalog[$ToolId]
     if ($null -eq $definition) { throw "Unknown Windows tool: $ToolId" }
     return $definition
+}
+
+function Get-WindowsGuiToolDefinition {
+    param([Parameter(Mandatory)][string]$ToolId)
+
+    $definition = $script:WindowsGuiPackageCatalog[$ToolId]
+    if ($null -eq $definition) { throw "Unknown Windows GUI tool: $ToolId" }
+    return $definition
+}
+
+function Test-WindowsGuiToolInstalled {
+    param([Parameter(Mandatory)][string]$ToolId)
+
+    switch ($ToolId) {
+        'antigravity' {
+            return (Test-Path -LiteralPath 'C:\Program Files\Antigravity\Antigravity.exe' -PathType Leaf) -or
+                ($null -ne (Get-Command 'antigravity' -ErrorAction SilentlyContinue))
+        }
+        'vscode' {
+            return (Test-Path -LiteralPath 'C:\Program Files\Microsoft VS Code\Code.exe' -PathType Leaf) -or
+                ($null -ne (Get-Command 'code' -ErrorAction SilentlyContinue))
+        }
+        'browser' {
+            return (Test-Path -LiteralPath 'C:\Program Files\Google\Chrome\Application\chrome.exe' -PathType Leaf) -or
+                (Test-Path -LiteralPath 'C:\Program Files\Microsoft\Edge\Application\msedge.exe' -PathType Leaf) -or
+                (Test-Path -LiteralPath 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' -PathType Leaf) -or
+                ($null -ne (Get-Command 'chrome' -ErrorAction SilentlyContinue)) -or
+                ($null -ne (Get-Command 'msedge' -ErrorAction SilentlyContinue))
+        }
+        default { throw "Unknown Windows GUI tool: $ToolId" }
+    }
 }
 
 function Refresh-WindowsProcessPath {
@@ -90,6 +126,16 @@ function Invoke-WindowsWingetCommand {
     $allowed = Test-WindowsExactArgumentList -Actual $Arguments -Expected @('--version')
     if (-not $allowed) {
         foreach ($definition in $script:WindowsPackageCatalog.Values) {
+            $installArguments = @(
+                'install', '--id', [string]$definition.id, '--exact', '--source', 'winget',
+                '--accept-source-agreements', '--accept-package-agreements'
+            )
+            if (Test-WindowsExactArgumentList -Actual $Arguments -Expected $installArguments) {
+                $allowed = $true
+                break
+            }
+        }
+        foreach ($definition in $script:WindowsGuiPackageCatalog.Values) {
             $installArguments = @(
                 'install', '--id', [string]$definition.id, '--exact', '--source', 'winget',
                 '--accept-source-agreements', '--accept-package-agreements'
@@ -365,4 +411,36 @@ function Invoke-WindowsToolInstall {
         return [pscustomobject]@{ tool_id = $ToolId; status = 'needs_restart' }
     }
     return [pscustomobject]@{ tool_id = $ToolId; status = 'failed'; reason = 'verification_failed' }
+}
+
+function Invoke-WindowsGuiToolInstall {
+    param(
+        [Parameter(Mandatory)][string]$ToolId,
+        [Parameter(Mandatory)][bool]$Confirmed,
+        [scriptblock]$AppProbe = { param($tool) Test-WindowsGuiToolInstalled -ToolId $tool },
+        [scriptblock]$PackageRunner = {
+            param($command, $arguments)
+            if ($command -ne 'winget') { throw 'Unknown package command.' }
+            Invoke-WindowsWingetCommand -Arguments $arguments
+        }
+    )
+
+    $definition = Get-WindowsGuiToolDefinition -ToolId $ToolId
+    if (-not $Confirmed) { return [pscustomobject]@{ tool_id = $ToolId; status = 'skipped' } }
+    if ([bool](& $AppProbe $ToolId)) { return [pscustomobject]@{ tool_id = $ToolId; status = 'installed' } }
+
+    $wingetCheck = & $PackageRunner 'winget' @('--version')
+    if ($null -eq $wingetCheck -or [int]$wingetCheck.exit_code -ne 0) {
+        return [pscustomobject]@{ tool_id = $ToolId; status = 'failed'; reason = 'winget_unavailable' }
+    }
+    $installArguments = @(
+        'install', '--id', [string]$definition.id, '--exact', '--source', 'winget',
+        '--accept-source-agreements', '--accept-package-agreements'
+    )
+    $installResult = & $PackageRunner 'winget' $installArguments
+    if ($null -eq $installResult -or [int]$installResult.exit_code -ne 0) {
+        return [pscustomobject]@{ tool_id = $ToolId; status = 'failed'; reason = 'winget_install_failed' }
+    }
+    if ([bool](& $AppProbe $ToolId)) { return [pscustomobject]@{ tool_id = $ToolId; status = 'installed' } }
+    return [pscustomobject]@{ tool_id = $ToolId; status = 'needs_restart' }
 }

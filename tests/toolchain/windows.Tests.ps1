@@ -1,9 +1,11 @@
 BeforeAll {
     $script:PlannerPath = Join-Path $PSScriptRoot '../../scripts/course-toolchain-windows.ps1'
     $script:InstallerPath = Join-Path $PSScriptRoot '../../scripts/toolchain/windows.ps1'
+    $script:ReportPath = Join-Path $PSScriptRoot '../../scripts/toolchain/report.ps1'
     $script:WindowsToolsFixturePath = Join-Path $PSScriptRoot 'fixtures/windows-tools.json'
     $script:WindowsDockerFixturePath = Join-Path $PSScriptRoot 'fixtures/docker-windows.json'
     . $script:PlannerPath
+    . $script:ReportPath
 }
 
 Describe 'Course toolchain profile planner' {
@@ -56,6 +58,46 @@ Describe 'Course toolchain profile planner' {
 
         { Get-CourseToolchainCatalog -CatalogPath $path } |
             Should -Throw '*Unknown GUI tool ID*'
+    }
+}
+
+Describe 'Course toolchain GUI and readiness report' {
+    It 'does not install GUI tools unless selected' {
+        (Get-CourseToolchainPlan -Profile full).tool_id | Should -Not -Contain 'vscode'
+    }
+
+    It 'requires confirmation before installing a GUI tool' {
+        $script:guiPackageCalls = 0
+        $result = Invoke-WindowsGuiToolInstall -ToolId vscode -Confirmed:$false -PackageRunner { $script:guiPackageCalls++ }
+
+        $result.status | Should -Be 'skipped'
+        $script:guiPackageCalls | Should -Be 0
+    }
+
+    It 'uses the fixed WinGet argv for VS Code' {
+        $script:guiPackageCalls = [System.Collections.Generic.List[object]]::new()
+        $result = Invoke-WindowsGuiToolInstall -ToolId vscode -Confirmed:$true -AppProbe { $false } -PackageRunner {
+            param($command, $arguments)
+            $script:guiPackageCalls.Add([pscustomobject]@{ command = $command; arguments = @($arguments) })
+            @{ exit_code = 0; stdout = 'ok'; stderr = '' }
+        }
+
+        $script:guiPackageCalls[1].command | Should -Be 'winget'
+        $script:guiPackageCalls[1].arguments | Should -Be @(
+            'install', '--id', 'Microsoft.VisualStudioCode', '--exact', '--source', 'winget',
+            '--accept-source-agreements', '--accept-package-agreements'
+        )
+        $result.status | Should -Be 'needs_restart'
+    }
+
+    It 'marks a profile unready when one required tool fails' {
+        (New-ToolchainReport -Profile line -Results @(@{ tool_id = 'cloudflared'; status = 'failed' })).ready |
+            Should -BeFalse
+    }
+
+    It 'does not expose tokens or personal paths' {
+        (New-ToolchainReport -Profile base -Results @(@{ safe_message = 'token ghp_fake at C:\Users\alice' })) |
+            ConvertTo-Json -Depth 8 | Should -Not -Match 'ghp_fake|alice'
     }
 }
 
