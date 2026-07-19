@@ -152,25 +152,32 @@ macos_vendor_checksum_source() {
   esac
 }
 
-macos_vendor_install() {
+macos_vendor_install() (
   local tool_id="$1" architecture="$2" filename url expected_sha256 work_dir package_path
+  macos_vendor_cleanup() {
+    if [ -n "${work_dir:-}" ] && [ -e "$work_dir" ]; then
+      rm -rf "$work_dir"
+    fi
+  }
   filename="$(macos_vendor_filename "$tool_id" "$architecture")" || return $?
   url="$(macos_vendor_url "$tool_id" "$architecture")" || return $?
   expected_sha256="$(macos_vendor_sha256 "$tool_id" "$architecture")" || return $?
   work_dir="$(mktemp -d "${TMPDIR:-/tmp}/course-toolchain.XXXXXX")" || return 1
+  trap macos_vendor_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   package_path="$work_dir/$filename"
 
-  curl --fail --location --proto '=https' --tlsv1.2 --output "$package_path" "$url" || { rm -rf "$work_dir"; return 1; }
-  printf '%s  %s\n' "$expected_sha256" "$package_path" | shasum -a 256 -c - || { rm -rf "$work_dir"; return 1; }
+  curl --fail --location --proto '=https' --tlsv1.2 --output "$package_path" "$url" || return 1
+  printf '%s  %s\n' "$expected_sha256" "$package_path" | shasum -a 256 -c - || return 1
 
   case "$tool_id" in
     node_lts|cloudflared)
-      sudo /usr/sbin/installer -pkg "$package_path" -target / || { rm -rf "$work_dir"; return 1; }
+      sudo /usr/sbin/installer -pkg "$package_path" -target / || return 1
       ;;
-    *) rm -rf "$work_dir"; return 64 ;;
+    *) return 64 ;;
   esac
-  rm -rf "$work_dir"
-}
+)
 
 install_macos_tool() {
   local tool_id="$1" confirmation="$2" architecture formula state
@@ -192,6 +199,8 @@ install_macos_tool() {
     formula="$(macos_brew_formula "$tool_id")" || return 64
     brew --version >/dev/null 2>&1 || { macos_json_state "$tool_id" failed; return 1; }
     brew install "$formula" || { macos_json_state "$tool_id" failed; return 1; }
+    macos_json_state "$tool_id" needs_restart
+    return 0
   else
     macos_vendor_install "$tool_id" "$architecture" || { macos_json_state "$tool_id" failed; return 1; }
   fi

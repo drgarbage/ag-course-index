@@ -120,6 +120,45 @@ STUB
   [[ "$output" == *'"status":"needs_restart"'* ]]
 }
 
+@test "Homebrew node install does not fail when PATH still resolves an outdated Node" {
+  load_macos_module
+  stub_bin="$BATS_TEST_TMPDIR/brew-old-node-bin"
+  mkdir -p "$stub_bin"
+  cat > "$stub_bin/brew" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$TOOLCHAIN_BREW_LOG"
+case "$1" in
+  --version|install) exit 0 ;;
+esac
+exit 64
+STUB
+  chmod +x "$stub_bin/brew"
+  export PATH="$stub_bin:$PATH"
+  export TOOLCHAIN_HAS_BREW=true
+  export TOOLCHAIN_NODE_VERSION=v24.3.9
+  export TOOLCHAIN_BREW_LOG="$BATS_TEST_TMPDIR/brew-old-node.log"
+
+  run install_macos_tool node_lts yes
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '2p' "$TOOLCHAIN_BREW_LOG")" = 'install node@24' ]
+  [[ "$output" == *'"status":"needs_restart"'* ]]
+}
+
+@test "vendor cleanup trap removes its temporary directory after an unexpected exit" {
+  load_macos_module
+  export TOOLCHAIN_VENDOR_TEST_DIR="$BATS_TEST_TMPDIR/vendor-temporary"
+  mkdir -p "$TOOLCHAIN_VENDOR_TEST_DIR"
+  mktemp() { printf '%s\n' "$TOOLCHAIN_VENDOR_TEST_DIR"; }
+  curl() { exit 91; }
+
+  set +e
+  (macos_vendor_install cloudflared arm64)
+  status=$?
+  set -e
+  [ "$status" -eq 91 ]
+  [ ! -e "$TOOLCHAIN_VENDOR_TEST_DIR" ]
+}
+
 @test "vendor fallback has fixed architecture URLs and checksums" {
   load_macos_module
   fixture="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["node_lts"]["vendor"]["arm64"]["url"])' "$FIXTURE")"
