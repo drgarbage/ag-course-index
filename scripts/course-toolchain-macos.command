@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# shellcheck source=toolchain/macos.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/toolchain/macos.sh"
+
 course_toolchain_catalog_path() {
   if [ -n "${COURSE_TOOLCHAIN_CATALOG:-}" ]; then
     printf '%s\n' "$COURSE_TOOLCHAIN_CATALOG"

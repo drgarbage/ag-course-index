@@ -1,0 +1,205 @@
+#!/bin/bash
+
+# This catalog is intentionally local and versioned. Do not accept package URLs,
+# checksums, executables, or argument lists from the environment.
+MACOS_NODE_MINIMUM_VERSION='24.4.0'
+MACOS_NODE_VERSION='24.4.0'
+MACOS_CLOUDFLARED_VERSION='2025.6.1'
+
+macos_json_state() {
+  python3 - "$1" "$2" "${3:-}" <<'PY'
+import json
+import sys
+
+state = {"tool_id": sys.argv[1], "status": sys.argv[2]}
+if sys.argv[3]:
+    state["version"] = sys.argv[3]
+print(json.dumps(state, separators=(",", ":")))
+PY
+}
+
+macos_tool_command() {
+  case "$1" in
+    node_lts) printf '%s\n' 'node' ;;
+    cloudflared) printf '%s\n' 'cloudflared' ;;
+    *) return 64 ;;
+  esac
+}
+
+macos_tool_version() {
+  case "$1" in
+    node_lts)
+      if [ -n "${TOOLCHAIN_NODE_VERSION+x}" ]; then
+        [ "$TOOLCHAIN_NODE_VERSION" = 'missing' ] && return 1
+        printf '%s\n' "$TOOLCHAIN_NODE_VERSION"
+        return 0
+      fi
+      ;;
+    cloudflared)
+      if [ -n "${TOOLCHAIN_CLOUDFLARED_VERSION+x}" ]; then
+        [ "$TOOLCHAIN_CLOUDFLARED_VERSION" = 'missing' ] && return 1
+        printf '%s\n' "$TOOLCHAIN_CLOUDFLARED_VERSION"
+        return 0
+      fi
+      ;;
+    *) return 64 ;;
+  esac
+
+  local command
+  command="$(macos_tool_command "$1")" || return 64
+  command -v "$command" >/dev/null 2>&1 || return 1
+  "$command" --version 2>/dev/null
+}
+
+macos_node_version_status() {
+  local version="$1" normalized major minor patch min_major min_minor min_patch
+  if [[ "$version" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
+  else
+    printf '%s\n' 'failed'
+    return 0
+  fi
+  IFS=. read -r min_major min_minor min_patch <<EOF
+$MACOS_NODE_MINIMUM_VERSION
+EOF
+  if [ "$major" -ne "$min_major" ] || [ "$minor" -lt "$min_minor" ] || { [ "$minor" -eq "$min_minor" ] && [ "$patch" -lt "$min_patch" ]; }; then
+    printf '%s\n' 'outdated'
+  else
+    printf '%s\n' 'ready'
+  fi
+}
+
+get_macos_tool_state() {
+  local tool_id="$1" version status
+  case "$tool_id" in
+    node_lts|cloudflared) ;;
+    *) macos_json_state "$tool_id" failed; return 64 ;;
+  esac
+  if ! version="$(macos_tool_version "$tool_id")"; then
+    macos_json_state "$tool_id" missing
+    return 0
+  fi
+  [ -n "$version" ] || { macos_json_state "$tool_id" failed; return 0; }
+  if [ "$tool_id" = node_lts ]; then
+    status="$(macos_node_version_status "$version")"
+  else
+    status=ready
+  fi
+  macos_json_state "$tool_id" "$status" "$version"
+}
+
+macos_architecture() {
+  local architecture="${TOOLCHAIN_ARCH:-$(uname -m)}"
+  case "$architecture" in
+    arm64|x86_64) printf '%s\n' "$architecture" ;;
+    *) return 65 ;;
+  esac
+}
+
+macos_has_homebrew() {
+  case "${TOOLCHAIN_HAS_BREW:-}" in
+    true) return 0 ;;
+    false) return 1 ;;
+    '') command -v brew >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+macos_brew_formula() {
+  case "$1" in
+    node_lts) printf '%s\n' 'node@24' ;;
+    cloudflared) printf '%s\n' 'cloudflared' ;;
+    *) return 64 ;;
+  esac
+}
+
+macos_vendor_filename() {
+  local tool_id="$1" architecture="$2"
+  case "$tool_id:$architecture" in
+    node_lts:arm64|node_lts:x86_64) printf '%s\n' "node-v${MACOS_NODE_VERSION}.pkg" ;;
+    cloudflared:arm64) printf '%s\n' 'cloudflared-arm64.pkg' ;;
+    cloudflared:x86_64) printf '%s\n' 'cloudflared-amd64.pkg' ;;
+    *) return 65 ;;
+  esac
+}
+
+macos_vendor_url() {
+  local filename
+  filename="$(macos_vendor_filename "$1" "$2")" || return $?
+  case "$1" in
+    node_lts) printf '%s\n' "https://nodejs.org/download/release/v${MACOS_NODE_VERSION}/${filename}" ;;
+    cloudflared) printf '%s\n' "https://github.com/cloudflare/cloudflared/releases/download/${MACOS_CLOUDFLARED_VERSION}/${filename}" ;;
+    *) return 64 ;;
+  esac
+}
+
+macos_vendor_sha256() {
+  case "$1:$2" in
+    node_lts:arm64|node_lts:x86_64) printf '%s\n' 'bff7a6239d9c5a809f4fe4e8585144ccc930533d88f8ef2935afa0d5aa86c244' ;;
+    cloudflared:arm64) printf '%s\n' 'c42f76d60c2a34df55589cbfb4f68a953610221a9abc2114181dfa15bf008731' ;;
+    cloudflared:x86_64) printf '%s\n' '7f12892073506438fabab6f9fc075332f4f57e1ed30ba8c1ddf71f86f743a63f' ;;
+    *) return 65 ;;
+  esac
+}
+
+macos_vendor_checksum_source() {
+  case "$1" in
+    node_lts) printf '%s\n' "https://nodejs.org/download/release/v${MACOS_NODE_VERSION}/SHASUMS256.txt" ;;
+    cloudflared) printf '%s\n' "https://github.com/cloudflare/cloudflared/releases/tag/${MACOS_CLOUDFLARED_VERSION}" ;;
+    *) return 64 ;;
+  esac
+}
+
+macos_vendor_install() {
+  local tool_id="$1" architecture="$2" filename url expected_sha256 work_dir package_path
+  filename="$(macos_vendor_filename "$tool_id" "$architecture")" || return $?
+  url="$(macos_vendor_url "$tool_id" "$architecture")" || return $?
+  expected_sha256="$(macos_vendor_sha256 "$tool_id" "$architecture")" || return $?
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/course-toolchain.XXXXXX")" || return 1
+  package_path="$work_dir/$filename"
+
+  curl --fail --location --proto '=https' --tlsv1.2 --output "$package_path" "$url" || { rm -rf "$work_dir"; return 1; }
+  printf '%s  %s\n' "$expected_sha256" "$package_path" | shasum -a 256 -c - || { rm -rf "$work_dir"; return 1; }
+
+  case "$tool_id" in
+    node_lts|cloudflared)
+      sudo /usr/sbin/installer -pkg "$package_path" -target / || { rm -rf "$work_dir"; return 1; }
+      ;;
+    *) rm -rf "$work_dir"; return 64 ;;
+  esac
+  rm -rf "$work_dir"
+}
+
+install_macos_tool() {
+  local tool_id="$1" confirmation="$2" architecture formula state
+  case "$tool_id" in
+    node_lts|cloudflared) ;;
+    *) macos_json_state "$tool_id" failed; return 64 ;;
+  esac
+  if [ "$confirmation" != yes ]; then
+    macos_json_state "$tool_id" skipped
+    return 2
+  fi
+  architecture="$(macos_architecture)" || { macos_json_state "$tool_id" failed; return 65; }
+  state="$(get_macos_tool_state "$tool_id")" || return 1
+  case "$state" in
+    *'"status":"ready"'*) printf '%s\n' "$state"; return 0 ;;
+  esac
+
+  if macos_has_homebrew; then
+    formula="$(macos_brew_formula "$tool_id")" || return 64
+    brew --version >/dev/null 2>&1 || { macos_json_state "$tool_id" failed; return 1; }
+    brew install "$formula" || { macos_json_state "$tool_id" failed; return 1; }
+  else
+    macos_vendor_install "$tool_id" "$architecture" || { macos_json_state "$tool_id" failed; return 1; }
+  fi
+
+  state="$(get_macos_tool_state "$tool_id")" || return 1
+  case "$state" in
+    *'"status":"ready"'*) printf '%s\n' "$state" ;;
+    *'"status":"missing"'*) macos_json_state "$tool_id" needs_restart ;;
+    *) macos_json_state "$tool_id" failed; return 1 ;;
+  esac
+}

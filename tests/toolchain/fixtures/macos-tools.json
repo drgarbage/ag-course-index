@@ -1,0 +1,18 @@
+{
+  "node_lts": {
+    "minimum_version": "24.4.0",
+    "vendor": {
+      "arm64": {
+        "url": "https://nodejs.org/download/release/v24.4.0/node-v24.4.0.pkg",
+        "sha256": "bff7a6239d9c5a809f4fe4e8585144ccc930533d88f8ef2935afa0d5aa86c244"
+      },
+      "x86_64": {
+        "url": "https://nodejs.org/download/release/v24.4.0/node-v24.4.0.pkg",
+        "sha256": "bff7a6239d9c5a809f4fe4e8585144ccc930533d88f8ef2935afa0d5aa86c244"
+      }
+    }
+  },
+  "cloudflared": {
+    "version": "2025.6.1"
+  }
+}
