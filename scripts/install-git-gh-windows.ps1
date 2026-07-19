@@ -27,7 +27,12 @@ function Get-InstallDiagnostics {
     param(
         [Parameter(Mandatory)][string]$Step,
         [string]$LastError = "",
-        [scriptblock]$CommandLookup = { param($name) $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
+        [scriptblock]$CommandLookup = { param($name) $null -ne (Get-Command $name -ErrorAction SilentlyContinue) },
+        [scriptblock]$RawNetworkProbe = {
+            if ($null -eq (Get-Command 'curl.exe' -ErrorAction SilentlyContinue)) { return $false }
+            & curl.exe --head --silent --show-error --max-time 5 https://raw.githubusercontent.com *> $null
+            return ($LASTEXITCODE -eq 0)
+        }
     )
 
     $safeError = $LastError -replace '(?i)C:\\Users\\[^\\\s]+', 'C:\Users\<USER>'
@@ -46,6 +51,9 @@ function Get-InstallDiagnostics {
         credential_helper_state = if ($Step -eq 'credential_helper' -and (& $CommandLookup "git")) {
             $configuredHelper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
             if ($configuredHelper) { 'configured' } else { 'missing' }
+        } else { 'unknown' }
+        raw_github_network = if ($Step -eq 'network') {
+            if (& $RawNetworkProbe) { 'ok' } else { 'blocked' }
         } else { 'unknown' }
         stderr = $safeError
     }

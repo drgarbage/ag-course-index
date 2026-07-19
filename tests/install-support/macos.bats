@@ -15,6 +15,10 @@ fake_diagnosis_provider() {
   printf '%s' "$6" > "$INSTALL_SUPPORT_PREVIOUS_LOG"
   printf '%s' "$FAKE_DIAGNOSIS"
 }
+fake_confirmation_provider() {
+  touch "$INSTALL_SUPPORT_CONFIRMATION_LOG"
+  printf '%s' "$FAKE_CONFIRMATION"
+}
 forbidden_consent_provider() { touch "$INSTALL_SUPPORT_CONSENT_LOG"; }
 forbidden_session_provider() { touch "$INSTALL_SUPPORT_SESSION_LOG"; }
 
@@ -133,6 +137,40 @@ STUB
   run awk '/CLEAR_STALE_GITHUB_CREDENTIAL_MACOS\)/{print; exit}' "$INSTALLER"
   [ "$status" -eq 0 ]
   [[ "$output" != *'security delete-'* ]]
+  install_support_run_command() { return 0; }
+  run run_allowlisted_action CLEAR_STALE_GITHUB_CREDENTIAL_MACOS yes
+  [ "$status" -eq 3 ]
+}
+
+@test "macOS uses local confirmation policy when backend says false" {
+  export FAKE_LOCAL_RESULT='{"matched":false}' FAKE_CONSENT=yes
+  export FAKE_SESSION='{"session_id":"is_fake","session_token":"signed-fake"}'
+  export FAKE_DIAGNOSIS='{"action":{"id":"INSTALL_GH_MACOS","requires_confirmation":false},"resolved":false,"support_code":"SUP-SAFE02"}'
+  export FAKE_CONFIRMATION=no INSTALL_SUPPORT_CONFIRMATION_LOG="$BATS_TEST_TMPDIR/confirmation.log"
+  export INSTALL_SUPPORT_PREVIOUS_LOG="$BATS_TEST_TMPDIR/previous.json"
+  run handle_install_failure gh_install '{}' fake_local_provider fake_consent_provider fake_session_provider fake_diagnosis_provider fake_confirmation_provider
+  [ "$status" -eq 3 ]
+  [ -f "$INSTALL_SUPPORT_CONFIRMATION_LOG" ]
+}
+
+@test "macOS rejects string resolved values" {
+  export FAKE_LOCAL_RESULT='{"matched":false}' FAKE_CONSENT=yes
+  export FAKE_SESSION='{"session_id":"is_fake","session_token":"signed-fake"}'
+  export FAKE_DIAGNOSIS='{"action":{"id":"CONTACT_INSTRUCTOR","requires_confirmation":false},"resolved":"true","support_code":"SUP-BADBOOL"}'
+  export INSTALL_SUPPORT_PREVIOUS_LOG="$BATS_TEST_TMPDIR/previous.json"
+  run handle_install_failure network '{}' fake_local_provider fake_consent_provider fake_session_provider fake_diagnosis_provider
+  [ "$status" -eq 4 ]
+}
+
+@test "collector emits blocked Raw GitHub enum without response body" {
+  STUB_BIN="$BATS_TEST_TMPDIR/raw-bin"
+  mkdir -p "$STUB_BIN"
+  printf '#!/bin/bash\nexit 7\n' > "$STUB_BIN/curl"
+  chmod +x "$STUB_BIN/curl"
+  export PATH="$STUB_BIN:$PATH"
+  diagnostics="$(collect_install_diagnostics network blocked)"
+  [ "$(json_field "$diagnostics" raw_github_network)" = blocked ]
+  [[ "$diagnostics" != *'network_body'* ]]
 }
 
 @test "offline API keeps the static fallback" {

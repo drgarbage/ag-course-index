@@ -36,13 +36,21 @@ for key in sys.argv[2].split("."):
 print(str(value).lower() if isinstance(value, bool) else value)' "$1" "$2"
 }
 
+json_path_type() {
+  python3 -c 'import json,sys
+value=json.loads(sys.argv[1])
+for key in sys.argv[2].split("."):
+    value=value.get(key, None) if isinstance(value,dict) else None
+print("boolean" if isinstance(value,bool) else "string" if isinstance(value,str) else "number" if isinstance(value,(int,float)) else "null" if value is None else "other")' "$1" "$2"
+}
+
 collect_install_diagnostics() {
   local support_step="$1"
   local last_error="${2:-}"
   local safe_error
   safe_error="$(printf '%s' "$last_error" | sed -E 's#/Users/[^/[:space:]]+#/Users/<USER>#g' | cut -c 1-4000)"
   local git_found=false gh_found=false xcode_tools_available=false local_bin_in_path=false
-  local github_auth_state=unknown credential_helper_state=unknown
+  local github_auth_state=unknown credential_helper_state=unknown raw_github_network=unknown
   has_command git && git_found=true
   has_command gh && gh_found=true
   xcode-select -p >/dev/null 2>&1 && xcode_tools_available=true
@@ -53,14 +61,18 @@ collect_install_diagnostics() {
   if [ "$support_step" = credential_helper ] && [ "$git_found" = true ]; then
     if git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' >/dev/null 2>&1; then credential_helper_state=configured; else credential_helper_state=missing; fi
   fi
+  if [ "$support_step" = network ]; then
+    if curl --head --silent --show-error --max-time 5 https://raw.githubusercontent.com >/dev/null 2>&1; then raw_github_network=ok; else raw_github_network=blocked; fi
+  fi
   python3 -c 'import json,sys; print(json.dumps({
     "platform":"macos", "step":sys.argv[1],
     "git_found":sys.argv[2] == "true", "gh_found":sys.argv[3] == "true",
     "xcode_tools_available":sys.argv[4] == "true", "local_bin_in_path":sys.argv[5] == "true",
-    "github_auth_state":sys.argv[6], "credential_helper_state":sys.argv[7], "stderr":sys.argv[8]
+    "github_auth_state":sys.argv[6], "credential_helper_state":sys.argv[7],
+    "raw_github_network":sys.argv[8], "stderr":sys.argv[9]
   }, separators=(",", ":")))' \
     "$support_step" "$git_found" "$gh_found" "$xcode_tools_available" "$local_bin_in_path" \
-    "$github_auth_state" "$credential_helper_state" "$safe_error"
+    "$github_auth_state" "$credential_helper_state" "$raw_github_network" "$safe_error"
 }
 
 new_install_support_session() {
@@ -129,7 +141,7 @@ run_allowlisted_action() {
     GH_AUTH_LOGIN_WEB) requires_confirmation=true; set -- gh auth login --hostname github.com --git-protocol https --web ;;
     GH_AUTH_SETUP_GIT) requires_confirmation=true; set -- gh auth setup-git --hostname github.com ;;
     GH_AUTH_SWITCH) requires_confirmation=true; set -- gh auth switch --hostname github.com ;;
-    CLEAR_STALE_GITHUB_CREDENTIAL_MACOS) requires_confirmation=true; set -- open -a 'Keychain Access' ;;
+    CLEAR_STALE_GITHUB_CREDENTIAL_MACOS) requires_confirmation=true; set -- __open_keychain_manual__ ;;
     RESTART_TERMINAL_REQUIRED) requires_confirmation=true; set -- __no_op__ ;;
     *) printf 'Unknown install support action: %s\n' "$action_id" >&2; return 64 ;;
   esac
@@ -140,7 +152,16 @@ run_allowlisted_action() {
   case "$1" in
     __no_op__) return 0 ;;
     __install_gh__) install_support_install_gh ;;
+    __open_keychain_manual__) install_support_run_command open -a 'Keychain Access' >/dev/null 2>&1; return 3 ;;
     *) install_support_run_command "$@" ;;
+  esac
+}
+
+macos_action_requires_confirmation() {
+  case "$1" in
+    INSTALL_XCODE_TOOLS_MACOS|INSTALL_GH_MACOS|GH_AUTH_LOGIN_WEB|GH_AUTH_SETUP_GIT|GH_AUTH_SWITCH|CLEAR_STALE_GITHUB_CREDENTIAL_MACOS|RESTART_TERMINAL_REQUIRED) return 0 ;;
+    CHECK_GIT_VERSION|CHECK_GH_VERSION|CHECK_XCODE_TOOLS|CHECK_GITHUB_NETWORK|CHECK_RAW_GITHUB_NETWORK|CHECK_GH_AUTH_STATUS|CHECK_GIT_CREDENTIAL_HELPER|OPEN_MACOS_KEYCHAIN_ACCESS|CONTACT_INSTRUCTOR) return 1 ;;
+    *) return 64 ;;
   esac
 }
 
@@ -195,6 +216,7 @@ handle_install_failure() {
   local support_step="$1" diagnostics="$2"
   local local_provider="${3:-invoke_local_install_pattern}" consent_provider="${4:-install_support_consent}"
   local session_provider="${5:-new_install_support_session}" diagnosis_provider="${6:-invoke_install_diagnosis}"
+  local confirmation_provider="${7:-install_support_confirmation}"
   local consent session_json session_id session_token previous_action=null support_code=''
   local local_result
   local_result="$($local_provider "$support_step" "$diagnostics")"
@@ -226,6 +248,10 @@ r=json.loads(sys.argv[1]); print(json.dumps({k:r[k] for k in ("local_pattern_key
     support_code="$(json_field "$diagnosis" support_code)"
     [ -n "$(json_field "$diagnosis" summary_zh_tw)" ] && printf '%s\n' "$(json_field "$diagnosis" summary_zh_tw)"
     [ -n "$(json_field "$diagnosis" explanation_zh_tw)" ] && printf '%s\n' "$(json_field "$diagnosis" explanation_zh_tw)"
+    [ "$(json_path_type "$diagnosis" resolved)" = boolean ] || {
+      printf 'AI 診斷回應格式錯誤；原本的靜態排錯說明仍然有效。\n'
+      return 4
+    }
     [ "$(json_field "$diagnosis" resolved)" = true ] && return 0
 
     action_id="$(json_path "$diagnosis" action.id)"
@@ -239,10 +265,19 @@ r=json.loads(sys.argv[1]); print(json.dumps({k:r[k] for k in ("local_pattern_key
       printf '請將支援碼 %s 提供給講師。\n' "$support_code"
       return 6
     }
-    requires_confirmation="$(json_path "$diagnosis" action.requires_confirmation)"
     confirmation=no
+    if macos_action_requires_confirmation "$action_id"; then
+      requires_confirmation=true
+    else
+      local policy_status=$?
+      [ "$policy_status" -eq 1 ] || {
+        printf 'AI 診斷回應包含不允許的動作；原本的靜態排錯說明仍然有效。\n'
+        return 4
+      }
+      requires_confirmation=false
+    fi
     if [ "$requires_confirmation" = true ]; then
-      confirmation="$(install_support_confirmation)"
+      confirmation="$($confirmation_provider)"
       case "$confirmation" in y|Y|yes|YES) confirmation=yes ;; *) return 3 ;; esac
     fi
 

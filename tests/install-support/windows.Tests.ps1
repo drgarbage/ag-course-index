@@ -26,6 +26,13 @@ Describe 'Install support diagnostics' {
         $diagnostics.stderr | Should -Be 'failed at C:\Users\<USER>\project'
     }
 
+    It 'collects a safe Raw GitHub network enum without response content' {
+        $diagnostics = Get-InstallDiagnostics -Step 'network' -LastError 'blocked' `
+            -CommandLookup { param($name) $false } -RawNetworkProbe { $false }
+        $diagnostics.raw_github_network | Should -Be 'blocked'
+        $diagnostics.PSObject.Properties.Name | Should -Not -Contain 'network_body'
+    }
+
     It 'creates a session without Authorization and diagnoses with the signed token' {
         $script:calls = [System.Collections.Generic.List[object]]::new()
         $transport = {
