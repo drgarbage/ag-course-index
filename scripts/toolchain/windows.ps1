@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
 $script:WindowsPackageCatalog = @{
-    node_lts = @{ id = 'OpenJS.NodeJS.LTS'; verify = @('node', '--version') }
+    node_lts = @{ id = 'OpenJS.NodeJS.LTS'; verify = @('node', '--version'); minimum_version = '24.4.0' }
     cloudflared = @{ id = 'Cloudflare.cloudflared'; verify = @('cloudflared', '--version') }
 }
 
@@ -18,6 +18,28 @@ function Refresh-WindowsProcessPath {
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $pathEntries = @($machinePath, $userPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     $env:Path = $pathEntries -join ';'
+}
+
+function ConvertTo-WindowsNodeVersion {
+    param([Parameter(Mandatory)][string]$Version)
+
+    if ($Version -notmatch '^v?(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)$') {
+        return $null
+    }
+    return [version]"$($Matches.major).$($Matches.minor).$($Matches.patch)"
+}
+
+function Test-WindowsExactArgumentList {
+    param(
+        [Parameter(Mandatory)][string[]]$Actual,
+        [Parameter(Mandatory)][string[]]$Expected
+    )
+
+    if ($Actual.Count -ne $Expected.Count) { return $false }
+    for ($index = 0; $index -lt $Expected.Count; $index++) {
+        if ($Actual[$index] -ne $Expected[$index]) { return $false }
+    }
+    return $true
 }
 
 function Get-WindowsToolState {
@@ -42,22 +64,47 @@ function Get-WindowsToolState {
     if ([string]::IsNullOrWhiteSpace($version)) {
         return [pscustomobject]@{ tool_id = $ToolId; status = 'failed' }
     }
-    if ($ToolId -eq 'node_lts' -and $version -notmatch '^v?24\.\d+\.\d+') {
-        return [pscustomobject]@{ tool_id = $ToolId; status = 'outdated'; version = $version }
+    if ($ToolId -eq 'node_lts') {
+        $nodeVersion = ConvertTo-WindowsNodeVersion -Version $version
+        if ($null -eq $nodeVersion) {
+            return [pscustomobject]@{ tool_id = $ToolId; status = 'failed'; version = $version }
+        }
+        $minimumVersion = [version]$definition.minimum_version
+        if ($nodeVersion.Major -ne $minimumVersion.Major -or $nodeVersion -lt $minimumVersion) {
+            return [pscustomobject]@{ tool_id = $ToolId; status = 'outdated'; version = $version }
+        }
     }
 
     return [pscustomobject]@{ tool_id = $ToolId; status = 'ready'; version = $version }
 }
 
-function Invoke-WindowsNativePackageCommand {
-    param(
-        [Parameter(Mandatory)][string]$Command,
-        [Parameter(Mandatory)][string[]]$Arguments
-    )
+function Invoke-WindowsWingetCommand {
+    param([Parameter(Mandatory)][string[]]$Arguments)
 
-    $output = & $Command @Arguments 2>&1
+    $allowed = Test-WindowsExactArgumentList -Actual $Arguments -Expected @('--version')
+    if (-not $allowed) {
+        foreach ($definition in $script:WindowsPackageCatalog.Values) {
+            $installArguments = @(
+                'install', '--id', [string]$definition.id, '--exact', '--source', 'winget',
+                '--accept-source-agreements', '--accept-package-agreements'
+            )
+            if (Test-WindowsExactArgumentList -Actual $Arguments -Expected $installArguments) {
+                $allowed = $true
+                break
+            }
+        }
+    }
+    if (-not $allowed) { throw 'Unknown WinGet arguments.' }
+
+    try {
+        $output = & winget @Arguments 2>&1
+        $exitCode = if ($?) { [int]$LASTEXITCODE } else { 1 }
+    } catch {
+        $output = @($_.Exception.Message)
+        $exitCode = 1
+    }
     [pscustomobject]@{
-        exit_code = $LASTEXITCODE
+        exit_code = $exitCode
         stdout = [string]($output -join [Environment]::NewLine)
         stderr = ''
     }
@@ -69,7 +116,11 @@ function Invoke-WindowsToolInstall {
         [Parameter(Mandatory)][bool]$Confirmed,
         [scriptblock]$CommandLookup = { param($command) $null -ne (Get-Command $command -ErrorAction SilentlyContinue) },
         [scriptblock]$VersionRunner = { param($command, $arguments) & $command @arguments },
-        [scriptblock]$PackageRunner = ${function:Invoke-WindowsNativePackageCommand}
+        [scriptblock]$PackageRunner = {
+            param($command, $arguments)
+            if ($command -ne 'winget') { throw 'Unknown package command.' }
+            Invoke-WindowsWingetCommand -Arguments $arguments
+        }
     )
 
     $definition = Get-WindowsToolDefinition -ToolId $ToolId

@@ -66,6 +66,24 @@ Describe 'Windows Node.js and Cloudflare toolchain installer' {
         $state.status | Should -Be 'ready'
     }
 
+    It 'rejects a Node version below the local minimum' {
+        $state = Get-WindowsToolState -ToolId node_lts -CommandLookup { $true } -VersionRunner { 'v24.3.9' }
+
+        $state.status | Should -Be 'outdated'
+    }
+
+    It 'accepts a Node version equal to the local minimum' {
+        $state = Get-WindowsToolState -ToolId node_lts -CommandLookup { $true } -VersionRunner { 'v24.4.0' }
+
+        $state.status | Should -Be 'ready'
+    }
+
+    It 'rejects a Node version with trailing garbage' {
+        $state = Get-WindowsToolState -ToolId node_lts -CommandLookup { $true } -VersionRunner { 'v24.4.0-not-semver' }
+
+        $state.status | Should -Be 'failed'
+    }
+
     It 'never installs cloudflared without confirmation' {
         $script:calls = 0
         $result = Invoke-WindowsToolInstall -ToolId cloudflared -Confirmed:$false -PackageRunner { $script:calls++ }
@@ -91,6 +109,34 @@ Describe 'Windows Node.js and Cloudflare toolchain installer' {
             '--accept-source-agreements', '--accept-package-agreements'
         )
         $result.status | Should -Be 'needs_restart'
+    }
+
+    It 'uses the fixed WinGet argv for the cloudflared package' {
+        $script:packageCalls = [System.Collections.Generic.List[object]]::new()
+        $result = Invoke-WindowsToolInstall -ToolId cloudflared -Confirmed:$true -CommandLookup { $false } -PackageRunner {
+            param($command, $arguments)
+            $script:packageCalls.Add([pscustomobject]@{ command = $command; arguments = @($arguments) })
+            @{ exit_code = 0; stdout = 'ok'; stderr = '' }
+        }
+
+        $script:packageCalls.Count | Should -Be 2
+        $script:packageCalls[0].command | Should -Be 'winget'
+        $script:packageCalls[0].arguments | Should -Be @('--version')
+        $script:packageCalls[1].command | Should -Be 'winget'
+        $script:packageCalls[1].arguments | Should -Be @(
+            'install', '--id', 'Cloudflare.cloudflared', '--exact', '--source', 'winget',
+            '--accept-source-agreements', '--accept-package-agreements'
+        )
+        $result.status | Should -Be 'needs_restart'
+    }
+
+    It 'does not expose a generic native package command runner' {
+        Get-Command Invoke-WindowsNativePackageCommand -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+    }
+
+    It 'rejects arbitrary WinGet argv before native execution' {
+        { Invoke-WindowsWingetCommand -Arguments @('install', '--id', 'evil.invalid') } |
+            Should -Throw '*Unknown WinGet arguments*'
     }
 
     It 'ignores external package ids and commands' {
