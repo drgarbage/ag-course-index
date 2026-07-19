@@ -246,27 +246,65 @@ macos_docker_sha256() {
 }
 
 verify_macos_docker() {
-  command -v docker >/dev/null 2>&1 || return 1
-  docker version >/dev/null 2>&1 || return 1
-  docker compose version >/dev/null 2>&1
+  local timeout_seconds="${1:-10}"
+  python3 - "$timeout_seconds" <<'PY'
+import subprocess
+import sys
+import time
+
+try:
+    timeout = float(sys.argv[1])
+except (TypeError, ValueError):
+    sys.exit(64)
+if timeout <= 0:
+    sys.exit(64)
+
+deadline = time.monotonic() + timeout
+for command in (["docker", "version"], ["docker", "compose", "version"]):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        sys.exit(1)
+    try:
+        result = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=remaining,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        sys.exit(1)
+    if result.returncode != 0:
+        sys.exit(1)
+PY
+}
+
+macos_docker_timeout_seconds() {
+  local requested="$1"
+  case "$requested" in
+    ''|*[!0-9]*) return 64 ;;
+  esac
+  [ "$requested" -ge 1 ] || return 64
+  if [ "$requested" -gt "$MACOS_DOCKER_READY_TIMEOUT_SECONDS" ]; then
+    printf '%s\n' "$MACOS_DOCKER_READY_TIMEOUT_SECONDS"
+  else
+    printf '%s\n' "$requested"
+  fi
 }
 
 wait_macos_docker_ready() {
-  local timeout_seconds="$1" deadline
-  case "$timeout_seconds" in
-    ''|*[!0-9]*) return 64 ;;
-  esac
-  if [ "$timeout_seconds" -lt 1 ] || [ "$timeout_seconds" -gt "$MACOS_DOCKER_READY_TIMEOUT_SECONDS" ]; then
-    return 64
-  fi
+  local timeout_seconds deadline remaining_seconds
+  timeout_seconds="$(macos_docker_timeout_seconds "$1")" || return 64
 
   deadline=$((SECONDS + timeout_seconds))
   while [ "$SECONDS" -lt "$deadline" ]; do
-    if verify_macos_docker; then
+    remaining_seconds=$((deadline - SECONDS))
+    if verify_macos_docker "$remaining_seconds"; then
       macos_json_state docker_desktop ready
       return 0
     fi
-    sleep 1
+    [ "$SECONDS" -lt "$deadline" ] && /bin/sleep 0.1
   done
 
   macos_json_state docker_desktop failed
@@ -277,7 +315,7 @@ install_macos_docker_desktop() (
   local confirmation="$1" architecture artifact filename url expected_sha256 work_dir mount_dir mounted=false
   macos_docker_cleanup() {
     if [ "$mounted" = true ]; then
-      hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+      /usr/bin/hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
     fi
     if [ -n "${work_dir:-}" ] && [ -e "$work_dir" ]; then
       rm -rf "$work_dir"
@@ -304,10 +342,10 @@ install_macos_docker_desktop() (
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
-  curl --fail --location --proto '=https' --tlsv1.2 --output "$filename" "$url" || { macos_json_state docker_desktop failed; return 1; }
-  printf '%s  %s\n' "$expected_sha256" "$filename" | shasum -a 256 -c - || { macos_json_state docker_desktop failed; return 1; }
+  /usr/bin/curl --fail --location --proto '=https' --tlsv1.2 --output "$filename" "$url" || { macos_json_state docker_desktop failed; return 1; }
+  printf '%s  %s\n' "$expected_sha256" "$filename" | /usr/bin/shasum -a 256 -c - || { macos_json_state docker_desktop failed; return 1; }
   mkdir -p "$mount_dir" || { macos_json_state docker_desktop failed; return 1; }
-  hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$filename" || { macos_json_state docker_desktop failed; return 1; }
+  /usr/bin/hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$filename" || { macos_json_state docker_desktop failed; return 1; }
   mounted=true
   if [ ! -d "$mount_dir/Docker.app" ]; then
     macos_json_state docker_desktop failed
@@ -318,7 +356,7 @@ install_macos_docker_desktop() (
     return 1
   fi
 
-  sudo ditto "$mount_dir/Docker.app" "$MACOS_DOCKER_DESKTOP_APP_PATH" || { macos_json_state docker_desktop failed; return 1; }
-  open "$MACOS_DOCKER_DESKTOP_APP_PATH" || { macos_json_state docker_desktop failed; return 1; }
+  /usr/bin/sudo /usr/bin/ditto "$mount_dir/Docker.app" "$MACOS_DOCKER_DESKTOP_APP_PATH" || { macos_json_state docker_desktop failed; return 1; }
+  /usr/bin/open "$MACOS_DOCKER_DESKTOP_APP_PATH" || { macos_json_state docker_desktop failed; return 1; }
   wait_macos_docker_ready "$MACOS_DOCKER_READY_TIMEOUT_SECONDS"
 )

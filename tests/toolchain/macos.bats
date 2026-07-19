@@ -185,23 +185,33 @@ STUB
 @test "Docker architecture selects only the matching official artifact" {
   load_macos_module
   export TOOLCHAIN_ARCH=arm64 TOOLCHAIN_DOCKER_FIXTURE="$DOCKER_FIXTURE"
+  expected_filename="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["arm64"]["filename"])' "$TOOLCHAIN_DOCKER_FIXTURE")"
+  expected_url="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["arm64"]["url"])' "$TOOLCHAIN_DOCKER_FIXTURE")"
+  expected_sha256="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["arm64"]["sha256"])' "$TOOLCHAIN_DOCKER_FIXTURE")"
 
   run docker_macos_artifact
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'Docker-AppleSilicon.dmg'* ]]
+  [ "$output" = "$expected_filename" ]
   [[ "$output" != *'Docker-Intel.dmg'* ]]
+  [ "$(macos_docker_download_url arm64)" = "$expected_url" ]
+  [ "$(macos_docker_sha256 arm64)" = "$expected_sha256" ]
 }
 
 @test "Intel Docker architecture selects only the matching official artifact" {
   load_macos_module
   export TOOLCHAIN_ARCH=x86_64 TOOLCHAIN_DOCKER_FIXTURE="$DOCKER_FIXTURE"
+  expected_filename="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["x86_64"]["filename"])' "$TOOLCHAIN_DOCKER_FIXTURE")"
+  expected_url="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["x86_64"]["url"])' "$TOOLCHAIN_DOCKER_FIXTURE")"
+  expected_sha256="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["x86_64"]["sha256"])' "$TOOLCHAIN_DOCKER_FIXTURE")"
 
   run docker_macos_artifact
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'Docker-Intel.dmg'* ]]
+  [ "$output" = "$expected_filename" ]
   [[ "$output" != *'Docker-AppleSilicon.dmg'* ]]
+  [ "$(macos_docker_download_url x86_64)" = "$expected_url" ]
+  [ "$(macos_docker_sha256 x86_64)" = "$expected_sha256" ]
 }
 
 @test "Docker install requires confirmation" {
@@ -216,14 +226,12 @@ STUB
 
 @test "legacy docker-compose does not satisfy readiness" {
   load_macos_module
-  docker() {
-    case "$*" in
-      version) return 0 ;;
-      'compose version') return 1 ;;
-      *) return 64 ;;
-    esac
-  }
-  docker-compose() { return 0; }
+  stub_bin="$BATS_TEST_TMPDIR/docker-legacy-bin"
+  mkdir -p "$stub_bin"
+  printf '%s\n' '#!/bin/bash' 'case "$*" in version) exit 0 ;; "compose version") exit 1 ;; *) exit 64 ;; esac' > "$stub_bin/docker"
+  printf '%s\n' '#!/bin/bash' 'exit 0' > "$stub_bin/docker-compose"
+  chmod +x "$stub_bin/docker" "$stub_bin/docker-compose"
+  export PATH="$stub_bin:$PATH"
 
   run verify_macos_docker
 
@@ -233,14 +241,12 @@ STUB
 
 @test "Docker readiness verifies Docker Engine and Compose v2 only" {
   load_macos_module
+  stub_bin="$BATS_TEST_TMPDIR/docker-ready-bin"
+  mkdir -p "$stub_bin"
   export TOOLCHAIN_DOCKER_LOG="$BATS_TEST_TMPDIR/docker-commands.log"
-  docker() {
-    printf '%s\n' "$*" >> "$TOOLCHAIN_DOCKER_LOG"
-    case "$*" in
-      version|'compose version') return 0 ;;
-      *) return 64 ;;
-    esac
-  }
+  printf '%s\n' '#!/bin/bash' 'printf '\''%s\n'\'' "$*" >> "$TOOLCHAIN_DOCKER_LOG"' 'case "$*" in version|"compose version") exit 0 ;; *) exit 64 ;; esac' > "$stub_bin/docker"
+  chmod +x "$stub_bin/docker"
+  export PATH="$stub_bin:$PATH"
 
   run verify_macos_docker
 
@@ -260,12 +266,47 @@ STUB
   [[ "$output" == *'"status":"failed"'* ]]
 }
 
-@test "Docker readiness rejects a timeout above two minutes" {
+@test "Docker readiness clamps a timeout above two minutes" {
   load_macos_module
 
-  run wait_macos_docker_ready 121
+  run macos_docker_timeout_seconds 121
 
-  [ "$status" -eq 64 ]
+  [ "$status" -eq 0 ]
+  [ "$output" = 120 ]
+}
+
+@test "Docker readiness interrupts a probe at the remaining deadline" {
+  load_macos_module
+  stub_bin="$BATS_TEST_TMPDIR/docker-blocking-bin"
+  mkdir -p "$stub_bin"
+  printf '%s\n' '#!/bin/bash' 'sleep 2' 'exit 1' > "$stub_bin/docker"
+  chmod +x "$stub_bin/docker"
+  export PATH="$stub_bin:$PATH"
+  started_at="$(python3 -c 'import time; print(time.monotonic())')"
+
+  run wait_macos_docker_ready 1
+
+  finished_at="$(python3 -c 'import time; print(time.monotonic())')"
+  elapsed="$(python3 -c 'import sys; print(float(sys.argv[2]) - float(sys.argv[1]))' "$started_at" "$finished_at")"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'"status":"failed"'* ]]
+  [ "$(python3 -c 'import sys; print(float(sys.argv[1]) <= 1.5)' "$elapsed")" = True ]
+}
+
+@test "macOS Docker native commands use fixed executables and argv" {
+  run python3 -c 'import sys
+source = open(sys.argv[1], encoding="utf-8").read().replace(chr(39), "")
+required = [
+    "/usr/bin/curl --fail --location --proto =https --tlsv1.2 --output",
+    "/usr/bin/shasum -a 256 -c -",
+    "/usr/bin/hdiutil attach -nobrowse -readonly -mountpoint",
+    "/usr/bin/hdiutil detach",
+    "/usr/bin/sudo /usr/bin/ditto",
+    "/usr/bin/open \"$MACOS_DOCKER_DESKTOP_APP_PATH\"",
+]
+assert all(item in source for item in required)' "$MODULE"
+
+  [ "$status" -eq 0 ]
 }
 
 @test "macOS Docker installer has no legacy Compose, login, or forced reboot commands" {
