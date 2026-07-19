@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Git 與 GitHub CLI 課程環境安裝程式"
 
 $InstallSupportBaseUrl = "https://gemini.printii.com/api/install-support"
+$InstallSupportPatternPath = Join-Path $PSScriptRoot 'install-support-patterns.json'
 
 function Invoke-InstallSupportRequest {
     param([hashtable]$Request)
@@ -155,6 +156,57 @@ function Invoke-AllowlistedInstallAction {
     }
 }
 
+function Invoke-LocalInstallPattern {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)]$Diagnostics,
+        [Parameter(Mandatory)][string]$RulesPath,
+        [scriptblock]$ConfirmationProvider = { Read-Host '是否執行上述本機修復？(y/N)' },
+        [scriptblock]$ActionRunner = { param($actionId, $confirmed) Invoke-AllowlistedInstallAction -ActionId $actionId -Confirmed:$confirmed }
+    )
+
+    if (-not (Test-Path $RulesPath -PathType Leaf)) { return $null }
+    try { $document = Get-Content $RulesPath -Raw | ConvertFrom-Json } catch { return $null }
+    if ($document.schema_version -ne 1 -or $null -eq $document.patterns) { return $null }
+    $allowedActions = @(
+        'CHECK_GIT_VERSION', 'CHECK_GH_VERSION', 'CHECK_WINGET_VERSION', 'CHECK_GITHUB_NETWORK',
+        'CHECK_RAW_GITHUB_NETWORK', 'CHECK_GH_AUTH_STATUS', 'CHECK_GIT_CREDENTIAL_HELPER',
+        'REFRESH_WINDOWS_PATH', 'INSTALL_GIT_WINDOWS', 'INSTALL_GH_WINDOWS', 'GH_AUTH_LOGIN_WEB',
+        'GH_AUTH_SETUP_GIT', 'GH_AUTH_SWITCH', 'CLEAR_STALE_GITHUB_CREDENTIAL_WINDOWS',
+        'OPEN_WINDOWS_CREDENTIAL_MANAGER', 'RESTART_TERMINAL_REQUIRED', 'CONTACT_INSTRUCTOR'
+    )
+    $allowedMatcherValues = @($true, $false, 'missing', 'expired', 'blocked', 'not_logged_in', 0, 1)
+
+    foreach ($pattern in $document.patterns) {
+        if ($pattern.platform -ne 'windows' -or $pattern.step -ne $Step) { continue }
+        if ($pattern.action_id -notin $allowedActions -or $pattern.risk -notin @('read_only', 'low', 'medium')) { continue }
+        $expectedConfirmation = $pattern.risk -in @('low', 'medium')
+        if ([bool]$pattern.requires_confirmation -ne $expectedConfirmation) { continue }
+        $matched = $true
+        foreach ($matcher in $pattern.all.PSObject.Properties) {
+            if ($matcher.Value -notin $allowedMatcherValues -or $Diagnostics[$matcher.Name] -ne $matcher.Value) {
+                $matched = $false
+                break
+            }
+        }
+        if (-not $matched) { continue }
+
+        $confirmed = $true
+        if ($pattern.requires_confirmation) {
+            $confirmed = ((& $ConfirmationProvider) -match '^(?i:y|yes)$')
+        }
+        $actionResult = & $ActionRunner ([string]$pattern.action_id) $confirmed
+        return [pscustomobject]@{
+            matched = $true
+            local_pattern_key = [string]$pattern.pattern_key
+            action_id = [string]$actionResult.action_id
+            exit_code = [int]$actionResult.exit_code
+            succeeded = ([int]$actionResult.exit_code -eq 0)
+        }
+    }
+    return $null
+}
+
 function Invoke-OptionalInstallSupport {
     param(
         [Parameter(Mandatory)][string]$Step,
@@ -172,8 +224,33 @@ function Invoke-OptionalInstallSupport {
             param($actionId, $confirmed)
             Invoke-AllowlistedInstallAction -ActionId $actionId -Confirmed:$confirmed
         },
+        [scriptblock]$LocalPatternProvider = {
+            param($supportStep, $safeDiagnostics, $confirmationProvider, $actionRunner)
+            if (-not [string]::IsNullOrWhiteSpace($script:InstallSupportPatternPath)) {
+                Invoke-LocalInstallPattern -Step $supportStep -Diagnostics $safeDiagnostics `
+                    -RulesPath $script:InstallSupportPatternPath -ConfirmationProvider $confirmationProvider -ActionRunner $actionRunner
+            }
+        },
         [scriptblock]$OutputWriter = { param($message) Write-Host $message }
     )
+
+    $localResult = & $LocalPatternProvider $Step $Diagnostics $ConfirmationProvider $ActionRunner
+    if ($localResult -and $localResult.matched -and $localResult.succeeded) {
+        return [pscustomobject]@{
+            status = 'local_resolved'
+            local_pattern_key = [string]$localResult.local_pattern_key
+            support_code = $null
+        }
+    }
+    $initialPreviousAction = $null
+    if ($localResult -and $localResult.matched) {
+        $initialPreviousAction = @{
+            local_pattern_key = [string]$localResult.local_pattern_key
+            action_id = [string]$localResult.action_id
+            exit_code = [int]$localResult.exit_code
+            succeeded = [bool]$localResult.succeeded
+        }
+    }
 
     if ((& $ConsentProvider) -notmatch '^(?i:y|yes)$') {
         return [pscustomobject]@{ status = 'declined'; support_code = $null }
@@ -181,7 +258,7 @@ function Invoke-OptionalInstallSupport {
 
     try {
         $session = & $SessionFactory $InstallerVersion
-        $previousAction = $null
+        $previousAction = $initialPreviousAction
         $supportCode = $null
         for ($attempt = 1; $attempt -le 15; $attempt++) {
             $diagnosis = & $DiagnosisProvider $session $Step $attempt $Diagnostics $previousAction
@@ -228,7 +305,7 @@ function Write-WarnZh([string]$Message) { Write-Host "  ! $Message" -ForegroundC
 function Stop-Zh(
     [string]$Message,
     [string]$Suggestion,
-    [string]$Step = 'final_verification'
+    [string]$Step = 'network'
 ) {
     Write-Host "`n安裝未完成：$Message" -ForegroundColor Red
     Write-Host "建議處理方式：$Suggestion" -ForegroundColor Yellow

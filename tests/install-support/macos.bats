@@ -8,6 +8,16 @@ setup() {
   source "$LIBRARY"
 }
 
+fake_local_provider() { printf '%s' "$FAKE_LOCAL_RESULT"; }
+fake_consent_provider() { printf '%s' "$FAKE_CONSENT"; }
+fake_session_provider() { printf '%s' "$FAKE_SESSION"; }
+fake_diagnosis_provider() {
+  printf '%s' "$6" > "$INSTALL_SUPPORT_PREVIOUS_LOG"
+  printf '%s' "$FAKE_DIAGNOSIS"
+}
+forbidden_consent_provider() { touch "$INSTALL_SUPPORT_CONSENT_LOG"; }
+forbidden_session_provider() { touch "$INSTALL_SUPPORT_SESSION_LOG"; }
+
 @test "collector redacts macOS homes and truncates stderr" {
   long_error="failed at /Users/alice/project $(printf '%04100d' 0)"
   diagnostics="$(collect_install_diagnostics github_auth "$long_error")"
@@ -100,6 +110,11 @@ STUB
   [[ "$output" == *'handle_install_failure'* ]]
 }
 
+@test "static failure handler uses a backend-allowlisted default step" {
+  run grep -F 'final_verification' "$INSTALLER"
+  [ "$status" -eq 1 ]
+}
+
 @test "offline API keeps the static fallback" {
   install_support_consent() { printf 'yes'; }
   new_install_support_session() { return 7; }
@@ -155,4 +170,46 @@ STUB
   [ "$(wc -l < "$INSTALL_SUPPORT_COMMAND_LOG" | tr -d ' ')" -eq 6 ]
   run run_allowlisted_action CLEAR_STALE_GITHUB_CREDENTIAL_MACOS no
   [ "$status" -eq 2 ]
+}
+
+@test "known local pattern succeeds without API or consent" {
+  export FAKE_LOCAL_RESULT='{"matched":true,"local_pattern_key":"macos.xcode_tools_missing.v1","action_id":"INSTALL_XCODE_TOOLS_MACOS","exit_code":0,"succeeded":true}'
+  export INSTALL_SUPPORT_CONSENT_LOG="$BATS_TEST_TMPDIR/consent.log"
+  export INSTALL_SUPPORT_SESSION_LOG="$BATS_TEST_TMPDIR/session.log"
+  [ "$(json_field "$(fake_local_provider)" matched)" = true ]
+
+  handle_install_failure xcode_tools '{"xcode_tools_available":false}' fake_local_provider forbidden_consent_provider forbidden_session_provider
+  status=$?
+  [ "$status" -eq 0 ]
+  [ ! -e "$INSTALL_SUPPORT_CONSENT_LOG" ]
+  [ ! -e "$INSTALL_SUPPORT_SESSION_LOG" ]
+}
+
+@test "failed local pattern is sent as first previous action after opt-in" {
+  export FAKE_LOCAL_RESULT='{"matched":true,"local_pattern_key":"macos.gh_missing.v1","action_id":"INSTALL_GH_MACOS","exit_code":1,"succeeded":false}'
+  export FAKE_CONSENT=yes
+  export FAKE_SESSION='{"session_id":"is_fake","session_token":"signed-fake"}'
+  export FAKE_DIAGNOSIS='{"action":{"id":"CONTACT_INSTRUCTOR","requires_confirmation":false},"resolved":false,"support_code":"SUP-LOCAL2"}'
+  export INSTALL_SUPPORT_PREVIOUS_LOG="$BATS_TEST_TMPDIR/previous.json"
+  [ "$(json_field "$(fake_local_provider)" local_pattern_key)" = 'macos.gh_missing.v1' ]
+
+  set +e
+  handle_install_failure gh_install '{"gh_found":false}' fake_local_provider fake_consent_provider fake_session_provider fake_diagnosis_provider
+  status=$?
+  set -e
+  [ "$status" -eq 6 ]
+  [ "$(json_field "$(cat "$INSTALL_SUPPORT_PREVIOUS_LOG")" local_pattern_key)" = 'macos.gh_missing.v1' ]
+}
+
+@test "versioned rules file has strict schema and no executable fields" {
+  rules="$BATS_TEST_DIRNAME/../../scripts/install-support-patterns.json"
+  [ -f "$rules" ]
+  run python3 -c 'import json,sys
+doc=json.load(open(sys.argv[1]))
+assert doc["schema_version"] == 1
+assert all(set(p) <= {"pattern_key","platform","step","all","action_id","risk","requires_confirmation","summary_zh_tw"} for p in doc["patterns"])
+assert all(set(p["all"].values()) <= {True,False,"missing","expired","blocked","not_logged_in",0,1} for p in doc["patterns"])' "$rules"
+  [ "$status" -eq 0 ]
+  run grep -Eiq '"(command|script|url|regex|expression)"' "$rules"
+  [ "$status" -eq 1 ]
 }

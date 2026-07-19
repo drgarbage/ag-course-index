@@ -9,8 +9,8 @@ fail() {
   printf '\n\033[31m安裝未完成：%s\033[0m\n' "$1"
   printf '\033[33m建議處理方式：%s\033[0m\n' "$2"
   local diagnostics
-  diagnostics="$(collect_install_diagnostics "${3:-final_verification}" "$1")"
-  if handle_install_failure "${3:-final_verification}" "$diagnostics"; then
+  diagnostics="$(collect_install_diagnostics "${3:-network}" "$1")"
+  if handle_install_failure "${3:-network}" "$diagnostics"; then
     ok 'AI 安裝助理已完成排錯。'
     exit 0
   fi
@@ -20,9 +20,12 @@ fail() {
 has_command() { command -v "$1" >/dev/null 2>&1; }
 
 INSTALL_SUPPORT_BASE_URL="https://gemini.printii.com/api/install-support"
+INSTALL_SUPPORT_PATTERN_FILE="${INSTALL_SUPPORT_PATTERN_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-support-patterns.json}"
 
 json_field() {
-  python3 -c 'import json,sys; value=json.loads(sys.argv[1]); print(value.get(sys.argv[2], ""))' "$1" "$2"
+  python3 -c 'import json,sys
+value=json.loads(sys.argv[1]).get(sys.argv[2], "")
+print(value if isinstance(value,str) else json.dumps(value,separators=(",",":")))' "$1" "$2"
 }
 
 json_path() {
@@ -131,6 +134,41 @@ run_allowlisted_action() {
   esac
 }
 
+invoke_local_install_pattern() {
+  local support_step="$1" diagnostics="$2" rules_path="${3:-$INSTALL_SUPPORT_PATTERN_FILE}"
+  local confirmation_provider="${4:-install_support_confirmation}" action_runner="${5:-run_allowlisted_action}"
+  [ -f "$rules_path" ] || { printf '{"matched":false}'; return 0; }
+  local match
+  match="$(python3 -c 'import json,sys
+doc=json.load(open(sys.argv[1])); diagnostics=json.loads(sys.argv[3])
+allowed_fields={"pattern_key","platform","step","all","action_id","risk","requires_confirmation","summary_zh_tw"}
+allowed_values={True,False,"missing","expired","blocked","not_logged_in",0,1}
+allowed_actions={"CHECK_GIT_VERSION","CHECK_GH_VERSION","CHECK_XCODE_TOOLS","CHECK_GITHUB_NETWORK","CHECK_RAW_GITHUB_NETWORK","CHECK_GH_AUTH_STATUS","CHECK_GIT_CREDENTIAL_HELPER","INSTALL_XCODE_TOOLS_MACOS","INSTALL_GH_MACOS","GH_AUTH_LOGIN_WEB","GH_AUTH_SETUP_GIT","GH_AUTH_SWITCH","CLEAR_STALE_GITHUB_CREDENTIAL_MACOS","OPEN_MACOS_KEYCHAIN_ACCESS","RESTART_TERMINAL_REQUIRED","CONTACT_INSTRUCTOR"}
+if doc.get("schema_version") != 1: raise SystemExit(0)
+for p in doc.get("patterns",[]):
+  if set(p) - allowed_fields or p.get("platform") != "macos" or p.get("step") != sys.argv[2]: continue
+  if p.get("action_id") not in allowed_actions or p.get("risk") not in {"read_only","low","medium"}: continue
+  if bool(p.get("requires_confirmation")) != (p.get("risk") in {"low","medium"}): continue
+  if any(v not in allowed_values for v in p.get("all",{}).values()): continue
+  if all(diagnostics.get(k) == v for k,v in p.get("all",{}).items()):
+    print("\t".join([p["pattern_key"],p["action_id"],str(p["requires_confirmation"]).lower()])); break' \
+    "$rules_path" "$support_step" "$diagnostics")" || { printf '{"matched":false}'; return 0; }
+  [ -n "$match" ] || { printf '{"matched":false}'; return 0; }
+  local pattern_key action_id requires_confirmation confirmation=no exit_code
+  pattern_key="$(printf '%s' "$match" | cut -f1)"
+  action_id="$(printf '%s' "$match" | cut -f2)"
+  requires_confirmation="$(printf '%s' "$match" | cut -f3)"
+  if [ "$requires_confirmation" = true ]; then
+    confirmation="$($confirmation_provider)"
+    case "$confirmation" in y|Y|yes|YES) confirmation=yes ;; *) confirmation=no ;; esac
+  fi
+  if "$action_runner" "$action_id" "$confirmation" >/dev/null; then exit_code=0; else exit_code=$?; fi
+  python3 -c 'import json,sys; print(json.dumps({
+    "matched":True,"local_pattern_key":sys.argv[1],"action_id":sys.argv[2],
+    "exit_code":int(sys.argv[3]),"succeeded":int(sys.argv[3]) == 0
+  },separators=(",",":")))' "$pattern_key" "$action_id" "$exit_code"
+}
+
 install_support_consent() {
   local answer
   read -r -p '是否使用 AI 安裝助理？(y/N)：' answer
@@ -145,11 +183,20 @@ install_support_confirmation() {
 
 handle_install_failure() {
   local support_step="$1" diagnostics="$2"
+  local local_provider="${3:-invoke_local_install_pattern}" consent_provider="${4:-install_support_consent}"
+  local session_provider="${5:-new_install_support_session}" diagnosis_provider="${6:-invoke_install_diagnosis}"
   local consent session_json session_id session_token previous_action=null support_code=''
-  consent="$(install_support_consent)"
+  local local_result
+  local_result="$($local_provider "$support_step" "$diagnostics")"
+  if [ "$(json_field "$local_result" matched)" = true ]; then
+    if [ "$(json_field "$local_result" succeeded)" = true ]; then return 0; fi
+    previous_action="$(python3 -c 'import json,sys
+r=json.loads(sys.argv[1]); print(json.dumps({k:r[k] for k in ("local_pattern_key","action_id","exit_code","succeeded")},separators=(",",":")))' "$local_result")"
+  fi
+  consent="$($consent_provider)"
   case "$consent" in y|Y|yes|YES) ;; *) return 3 ;; esac
 
-  if ! session_json="$(new_install_support_session '1.0.0')"; then
+  if ! session_json="$($session_provider '1.0.0')"; then
     printf 'AI 診斷目前無法連線；原本的靜態排錯說明仍然有效。\n'
     return 4
   fi
@@ -162,7 +209,7 @@ handle_install_failure() {
 
   local attempt diagnosis action_id requires_confirmation confirmation exit_code
   for attempt in $(seq 1 15); do
-    if ! diagnosis="$(invoke_install_diagnosis "$session_id" "$session_token" "$support_step" "$attempt" "$diagnostics" "$previous_action")"; then
+    if ! diagnosis="$($diagnosis_provider "$session_id" "$session_token" "$support_step" "$attempt" "$diagnostics" "$previous_action")"; then
       printf 'AI 診斷目前無法連線；原本的靜態排錯說明仍然有效。\n'
       return 4
     fi

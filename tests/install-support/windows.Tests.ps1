@@ -99,6 +99,11 @@ Describe 'Windows install action allowlist' {
 }
 
 Describe 'Optional Windows AI recovery flow' {
+    It 'uses only backend-allowlisted default steps' {
+        $source = Get-Content $script:InstallerPath -Raw
+        $source | Should -Not -Match "Step = 'final_verification'"
+    }
+
     It 'is connected to the existing static failure handler' {
         $source = Get-Content $script:InstallerPath -Raw
         $source | Should -Match '(?s)function Stop-Zh.*Invoke-OptionalInstallSupport'
@@ -203,5 +208,76 @@ Describe 'Cross-platform acceptance matrix' {
         }
         $result.action_id | Should -Be $Action
         if ($Action -notin @('REFRESH_WINDOWS_PATH')) { $script:acceptanceCalls | Should -Be 1 }
+    }
+}
+
+Describe 'Versioned local install patterns' {
+    It 'resolves a known pattern without creating an API session' {
+        $script:sessionCalls = 0
+        $script:localCalls = 0
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'gh_install' `
+            -Diagnostics @{ gh_found = $false; winget_available = $true } `
+            -LocalPatternProvider {
+                param($step, $diagnostics, $confirmationProvider, $actionRunner)
+                $script:localCalls++
+                @{ matched = $true; local_pattern_key = 'windows.gh_missing.v1'; succeeded = $true }
+            } `
+            -ConsentProvider { throw 'consent must not be requested' } `
+            -SessionFactory { $script:sessionCalls++; throw 'session must not be created' }
+
+        $result.status | Should -Be 'local_resolved'
+        $result.local_pattern_key | Should -Be 'windows.gh_missing.v1'
+        $script:localCalls | Should -Be 1
+        $script:sessionCalls | Should -Be 0
+    }
+
+    It 'reports a failed local pattern as the first AI previous action' {
+        $script:firstPreviousAction = $null
+        $result = Invoke-OptionalInstallSupport `
+            -Step 'gh_install' `
+            -Diagnostics @{ gh_found = $false; winget_available = $true } `
+            -LocalPatternProvider {
+                @{ matched = $true; local_pattern_key = 'windows.gh_missing.v1'; action_id = 'INSTALL_GH_WINDOWS'; exit_code = 1; succeeded = $false }
+            } `
+            -ConsentProvider { 'y' } `
+            -SessionFactory { @{ session_id = 'is_fake'; session_token = 'signed-fake' } } `
+            -DiagnosisProvider {
+                param($session, $step, $attempt, $diagnostics, $previousAction)
+                $script:firstPreviousAction = $previousAction
+                @{ action = @{ id = 'CONTACT_INSTRUCTOR'; requires_confirmation = $false }; resolved = $false; support_code = 'SUP-LOCAL1' }
+            }
+
+        $script:firstPreviousAction.local_pattern_key | Should -Be 'windows.gh_missing.v1'
+        $script:firstPreviousAction.action_id | Should -Be 'INSTALL_GH_WINDOWS'
+        $script:firstPreviousAction.succeeded | Should -BeFalse
+        $result.status | Should -Be 'contact'
+    }
+
+    It 'loads only strict boolean enum and exit-code matchers' {
+        $rulesPath = Join-Path $PSScriptRoot '../../scripts/install-support-patterns.json'
+        $script:patternActions = 0
+        $result = Invoke-LocalInstallPattern `
+            -Step 'gh_install' `
+            -Diagnostics @{ gh_found = $false; winget_available = $true } `
+            -RulesPath $rulesPath `
+            -ConfirmationProvider { 'y' } `
+            -ActionRunner {
+                param($actionId, $confirmed)
+                $script:patternActions++
+                @{ action_id = $actionId; exit_code = 0; stdout = ''; stderr = '' }
+            }
+
+        $result.local_pattern_key | Should -Be 'windows.gh_missing.v1'
+        $result.succeeded | Should -BeTrue
+        $script:patternActions | Should -Be 1
+        $rules = Get-Content $rulesPath -Raw | ConvertFrom-Json
+        foreach ($pattern in $rules.patterns) {
+            $pattern.PSObject.Properties.Name | Should -Not -Contain 'command'
+            $pattern.PSObject.Properties.Name | Should -Not -Contain 'script'
+            $pattern.PSObject.Properties.Name | Should -Not -Contain 'url'
+            $pattern.PSObject.Properties.Name | Should -Not -Contain 'regex'
+            $pattern.PSObject.Properties.Name | Should -Not -Contain 'expression'
+        }
     }
 }
