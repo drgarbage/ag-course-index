@@ -120,3 +120,128 @@ install_course_toolchain_macos_gui_tool() {
 render_course_toolchain_macos_readiness_report() {
   render_toolchain_report "$1" "$2" "${3:-}"
 }
+
+course_toolchain_macos_support_step() {
+  case "$1:$2" in
+    git_gh:path|git_gh:network|git_gh:git_install|git_gh:gh_install) printf '%s\n' "$2" ;;
+    *) return 64 ;;
+  esac
+}
+
+new_course_toolchain_macos_safe_diagnostics() {
+  local support_step="$1" result_json="$2"
+  python3 - "$support_step" "$result_json" <<'PY'
+import json
+import re
+import sys
+
+try:
+    result = json.loads(sys.argv[2])
+except (TypeError, ValueError):
+    result = {}
+if not isinstance(result, dict):
+    result = {}
+
+def safe_text(value):
+    text = "" if value is None else str(value)
+    text = re.sub(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_-]+|(?:sk|pk)_[A-Za-z0-9_-]+)\b", "[REDACTED]", text)
+    text = re.sub(r"(?i)\b(token|password|secret|api[_-]?key)\s*[:=]?\s*\S+", r"\1 [REDACTED]", text)
+    return re.sub(r"(?im)(?:[A-Z]:\\Users\\|/(?:Users|home)/)[^\r\n]*", "[USER_PATH]", text)
+
+exit_code = result.get("exit_code")
+if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+    exit_code = None
+error_kind = result.get("error_kind")
+if error_kind not in {"path", "network", "git_install", "gh_install", "unknown"}:
+    error_kind = "unknown"
+print(json.dumps({
+    "platform": "macos",
+    "step": sys.argv[1],
+    "tool_id": result.get("tool_id") if isinstance(result.get("tool_id"), str) else "",
+    "found": bool(result.get("found")),
+    "version": safe_text(result.get("version")),
+    "exit_code": exit_code,
+    "error_kind": error_kind,
+    "restart_required": bool(result.get("restart_required")),
+    "engine_running": bool(result.get("engine_running")),
+}, separators=(",", ":")))
+PY
+}
+
+resolve_course_toolchain_macos_failure() {
+  local profile="$1" result_json="$2"
+  local fallback_writer="${3:-course_toolchain_macos_local_fallback}"
+  local consent_provider="${4:-course_toolchain_macos_support_consent}"
+  local support_invoker="${5:-course_toolchain_macos_support_invoke}"
+  local tool_id status error_kind support_step safe_message diagnostics support_result support_status support_code
+
+  case "$profile" in base|line|data|full) ;; *) return 64 ;; esac
+  tool_id="$(python3 -c 'import json,sys
+try: value=json.loads(sys.argv[1]).get("tool_id", "")
+except (TypeError,ValueError): value=""
+print(value if isinstance(value,str) else "")' "$result_json")"
+  status="$(python3 -c 'import json,sys
+try: value=json.loads(sys.argv[1]).get("status", "")
+except (TypeError,ValueError): value=""
+print(value if isinstance(value,str) else "")' "$result_json")"
+  case "$profile:$tool_id" in
+    base:git_gh|base:node_lts|line:git_gh|line:node_lts|line:cloudflared|data:git_gh|data:node_lts|data:docker_desktop|full:git_gh|full:node_lts|full:cloudflared|full:docker_desktop) ;;
+    *) printf '%s\n' '{"status":"not_applicable","support_code":null}'; return 0 ;;
+  esac
+  [ "$status" = failed ] || { printf '%s\n' '{"status":"not_applicable","support_code":null}'; return 0; }
+
+  safe_message="$(python3 -c 'import json,re,sys
+try: value=json.loads(sys.argv[1]).get("safe_message", "")
+except (TypeError,ValueError): value=""
+text="" if value is None else str(value)
+text=re.sub(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_-]+|(?:sk|pk)_[A-Za-z0-9_-]+)\b", "[REDACTED]", text)
+text=re.sub(r"(?i)\b(token|password|secret|api[_-]?key)\s*[:=]?\s*\S+", r"\1 [REDACTED]", text)
+print(re.sub(r"(?im)(?:[A-Z]:\\Users\\|/(?:Users|home)/)[^\r\n]*", "[USER_PATH]", text))' "$result_json")"
+  "$fallback_writer" "${safe_message:-本機固定排錯仍未完成。}"
+
+  error_kind="$(python3 -c 'import json,sys
+try: value=json.loads(sys.argv[1]).get("error_kind", "")
+except (TypeError,ValueError): value=""
+print(value if isinstance(value,str) else "")' "$result_json")"
+  if ! support_step="$(course_toolchain_macos_support_step "$tool_id" "$error_kind")"; then
+    "$fallback_writer" '此工具沒有可安全自動執行的支援動作；請聯絡講師。'
+    printf '%s\n' '{"status":"contact_instructor","action_id":"CONTACT_INSTRUCTOR","support_code":null}'
+    return 0
+  fi
+  case "$("$consent_provider")" in y|Y|yes|YES) ;; *) printf '%s\n' '{"status":"declined","support_code":null}'; return 0 ;; esac
+
+  diagnostics="$(new_course_toolchain_macos_safe_diagnostics "$support_step" "$result_json")"
+  if ! support_result="$("$support_invoker" "$support_step" "$diagnostics")"; then
+    printf '%s\n' '{"status":"fallback","support_code":null}'
+    return 0
+  fi
+  support_status="$(python3 -c 'import json,sys
+try: value=json.loads(sys.argv[1]).get("status", "fallback")
+except (TypeError,ValueError): value="fallback"
+print(value if value in {"local_resolved","resolved","fallback","action_declined","contact","limit","declined"} else "fallback")' "$support_result")"
+  support_code="$(python3 -c 'import json,re,sys
+try: value=json.loads(sys.argv[1]).get("support_code", "")
+except (TypeError,ValueError): value=""
+text="" if value is None else str(value)
+print(re.sub(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_-]+|(?:sk|pk)_[A-Za-z0-9_-]+)\b", "[REDACTED]", text))' "$support_result")"
+  python3 -c 'import json,sys; print(json.dumps({"status":sys.argv[1],"support_code":sys.argv[2] or None},separators=(",",":")))' "$support_status" "$support_code"
+}
+
+course_toolchain_macos_local_fallback() { printf '%s\n' "$1" >&2; }
+course_toolchain_macos_support_consent() { read -r -p '是否使用 AI 安裝助理？(y/N)：' answer; printf '%s' "$answer"; }
+course_toolchain_macos_support_invoke() {
+  if ! declare -F handle_install_failure >/dev/null; then
+    printf '%s\n' '{"status":"fallback"}'
+    return 0
+  fi
+  if handle_install_failure "$1" "$2"; then
+    printf '%s\n' '{"status":"resolved"}'
+  else
+    case "$?" in
+      3) printf '%s\n' '{"status":"action_declined"}' ;;
+      5) printf '%s\n' '{"status":"limit"}' ;;
+      6) printf '%s\n' '{"status":"contact"}' ;;
+      *) printf '%s\n' '{"status":"fallback"}' ;;
+    esac
+  fi
+}

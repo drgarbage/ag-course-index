@@ -468,3 +468,75 @@ assert all(item in source for item in required)' "$MODULE"
 
   [ "$status" -eq 1 ]
 }
+
+toolchain_test_no_support() {
+  printf 'SUPPORT_CALLED\n'
+  printf '{"status":"resolved"}'
+}
+
+toolchain_test_declined() { printf 'n'; }
+toolchain_test_accepted() { printf 'y'; }
+toolchain_test_fallback() { printf 'LOCAL_FALLBACK\n' >&2; }
+
+toolchain_test_capture_support() {
+  python3 -c 'import json,sys; json.dump({"step":sys.argv[1],"diagnostics":json.loads(sys.argv[2])},open(sys.argv[3],"w"),separators=(",",":"))' "$1" "$2" "$TOOLCHAIN_DIAGNOSTICS_CAPTURE"
+  printf '{"status":"fallback"}'
+}
+
+toolchain_test_unknown_action() {
+  printf '{"status":"fallback","remote_action":{"id":"RUN_ARBITRARY_COMMAND","command":"evil","url":"https://evil.invalid"}}'
+}
+
+@test "macOS optional diagnostics creates no support session for ready or skipped tools" {
+  run resolve_course_toolchain_macos_failure base '{"tool_id":"node_lts","status":"ready"}' toolchain_test_fallback toolchain_test_accepted toolchain_test_no_support
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"not_applicable"'* ]]
+  [[ "$output" != *SUPPORT_CALLED* ]]
+
+  run resolve_course_toolchain_macos_failure base '{"tool_id":"node_lts","status":"skipped"}' toolchain_test_fallback toolchain_test_accepted toolchain_test_no_support
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"not_applicable"'* ]]
+  [[ "$output" != *SUPPORT_CALLED* ]]
+}
+
+@test "macOS optional diagnostics leaves AI offline when consent is declined" {
+  run resolve_course_toolchain_macos_failure base '{"tool_id":"git_gh","status":"failed","error_kind":"git_install","safe_message":"token ghp_fake at /Users/Alice/.env"}' toolchain_test_fallback toolchain_test_declined toolchain_test_no_support
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"declined"'* ]]
+  [[ "$output" == *LOCAL_FALLBACK* ]]
+  [[ "$output" != *ghp_fake* ]]
+  [[ "$output" != *Alice* ]]
+  [[ "$output" != *.env* ]]
+  [[ "$output" != *SUPPORT_CALLED* ]]
+}
+
+@test "macOS optional diagnostics sends only the safe toolchain payload" {
+  TOOLCHAIN_DIAGNOSTICS_CAPTURE="$BATS_TEST_TMPDIR/toolchain-diagnostics.json"
+  export TOOLCHAIN_DIAGNOSTICS_CAPTURE
+  run resolve_course_toolchain_macos_failure base '{"tool_id":"git_gh","status":"failed","error_kind":"network","found":false,"version":"ghp_fake","exit_code":17,"restart_required":true,"engine_running":false,"safe_message":"token ghp_fake at /Users/Alice/workspace/.env","env":{"SECRET":"nope"},"authorization":"Bearer nope","command":"evil","url":"https://evil.invalid"}' toolchain_test_fallback toolchain_test_accepted toolchain_test_capture_support
+  [ "$status" -eq 0 ]
+  [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["step"])' "$TOOLCHAIN_DIAGNOSTICS_CAPTURE")" = network ]
+  run python3 -c 'import json,sys; payload=json.load(open(sys.argv[1])); print(",".join(payload["diagnostics"]))' "$TOOLCHAIN_DIAGNOSTICS_CAPTURE"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'platform,step,tool_id,found,version,exit_code,error_kind,restart_required,engine_running' ]
+  run grep -E 'ghp_fake|Alice|\.env|SECRET|authorization|evil|url' "$TOOLCHAIN_DIAGNOSTICS_CAPTURE"
+  [ "$status" -ne 0 ]
+}
+
+@test "macOS keeps Node Docker and cloudflared on fixed contact-instructor fallback" {
+  for tool_id in node_lts cloudflared docker_desktop; do
+    run resolve_course_toolchain_macos_failure full "{\"tool_id\":\"$tool_id\",\"status\":\"failed\",\"error_kind\":\"unknown\"}" toolchain_test_fallback toolchain_test_accepted toolchain_test_no_support
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"status":"contact_instructor"'* ]]
+    [[ "$output" == *'"action_id":"CONTACT_INSTRUCTOR"'* ]]
+    [[ "$output" != *SUPPORT_CALLED* ]]
+  done
+}
+
+@test "macOS falls back when the existing dispatcher rejects a remote action" {
+  run resolve_course_toolchain_macos_failure base '{"tool_id":"git_gh","status":"failed","error_kind":"gh_install"}' toolchain_test_fallback toolchain_test_accepted toolchain_test_unknown_action
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"fallback"'* ]]
+  [[ "$output" != *RUN_ARBITRARY_COMMAND* ]]
+  [[ "$output" != *evil.invalid* ]]
+}

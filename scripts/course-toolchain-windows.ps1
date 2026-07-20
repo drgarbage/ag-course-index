@@ -152,3 +152,103 @@ function Get-CourseToolchainWindowsReadinessReport {
 
     New-ToolchainReport -Profile $Profile -Results $Results -FreeBytes $FreeBytes
 }
+
+function Get-CourseToolchainWindowsFailureValue {
+    param(
+        [Parameter(Mandatory)][object]$Result,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($Result -is [System.Collections.IDictionary] -and $Result.Contains($Name)) { return $Result[$Name] }
+    $property = $Result.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+    return $null
+}
+
+function Get-CourseToolchainWindowsSupportStep {
+    param(
+        [Parameter(Mandatory)][string]$ToolId,
+        [AllowNull()][object]$ErrorKind
+    )
+
+    if ($ToolId -cne 'git_gh' -or $ErrorKind -isnot [string]) { return $null }
+    if ($ErrorKind -cin @('path', 'network', 'git_install', 'gh_install')) { return $ErrorKind }
+    return $null
+}
+
+function New-CourseToolchainWindowsSafeDiagnostics {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)][string]$ToolId,
+        [Parameter(Mandatory)][object]$Result
+    )
+
+    $found = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'found'
+    $version = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'version'
+    $exitCode = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'exit_code'
+    $errorKind = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'error_kind'
+    $restartRequired = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'restart_required'
+    $engineRunning = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'engine_running'
+    $safeErrorKinds = @('path', 'network', 'git_install', 'gh_install', 'unknown')
+    $safeExitCode = 0
+    $hasExitCode = [int]::TryParse([string]$exitCode, [ref]$safeExitCode)
+
+    [pscustomobject][ordered]@{
+        platform = 'windows'
+        step = $Step
+        tool_id = $ToolId
+        found = [bool]$found
+        version = ConvertTo-ToolchainSafeText $version
+        exit_code = if ($hasExitCode) { $safeExitCode } else { $null }
+        error_kind = if ($errorKind -is [string] -and $errorKind -cin $safeErrorKinds) { $errorKind } else { 'unknown' }
+        restart_required = [bool]$restartRequired
+        engine_running = [bool]$engineRunning
+    }
+}
+
+function Resolve-CourseToolchainWindowsFailure {
+    param(
+        [Parameter(Mandatory)][ValidateSet('base', 'line', 'data', 'full')][string]$Profile,
+        [Parameter(Mandatory)][object]$Result,
+        [scriptblock]$FallbackWriter = { param($message) Write-Host $message },
+        [scriptblock]$ConsentProvider = { Read-Host '是否使用 AI 安裝助理？(y/N)' },
+        [scriptblock]$SupportInvoker = {
+            param($step, $diagnostics)
+            $support = Get-Command Invoke-OptionalInstallSupport -ErrorAction SilentlyContinue
+            if ($null -eq $support) { return [pscustomobject]@{ status = 'fallback' } }
+            Invoke-OptionalInstallSupport -Step $step -Diagnostics $diagnostics -ConsentProvider { 'y' }
+        }
+    )
+
+    $toolId = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'tool_id'
+    $status = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'status'
+    $requiredTools = @($script:CourseToolchainProfiles[$Profile])
+    if ($toolId -isnot [string] -or $status -isnot [string] -or -not ($requiredTools -ccontains $toolId) -or $status -cne 'failed') {
+        return [pscustomobject]@{ status = 'not_applicable'; support_code = $null }
+    }
+
+    $errorKind = Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'error_kind'
+    $safeMessage = ConvertTo-ToolchainSafeText (Get-CourseToolchainWindowsFailureValue -Result $Result -Name 'safe_message')
+    if ([string]::IsNullOrWhiteSpace($safeMessage)) { $safeMessage = '本機固定排錯仍未完成。' }
+    & $FallbackWriter $safeMessage
+
+    $step = Get-CourseToolchainWindowsSupportStep -ToolId $toolId -ErrorKind $errorKind
+    if ($null -eq $step) {
+        & $FallbackWriter '此工具沒有可安全自動執行的支援動作；請聯絡講師。'
+        return [pscustomobject]@{ status = 'contact_instructor'; action_id = 'CONTACT_INSTRUCTOR'; support_code = $null }
+    }
+    if ((& $ConsentProvider) -notmatch '^(?i:y|yes)$') {
+        return [pscustomobject]@{ status = 'declined'; support_code = $null }
+    }
+
+    $diagnostics = New-CourseToolchainWindowsSafeDiagnostics -Step $step -ToolId $toolId -Result $Result
+    try {
+        $supportResult = & $SupportInvoker $step $diagnostics
+        $supportStatus = Get-CourseToolchainWindowsFailureValue -Result $supportResult -Name 'status'
+        $supportCode = ConvertTo-ToolchainSafeText (Get-CourseToolchainWindowsFailureValue -Result $supportResult -Name 'support_code')
+        if ($supportStatus -cnotin @('local_resolved', 'resolved', 'fallback', 'action_declined', 'contact', 'limit', 'declined')) { $supportStatus = 'fallback' }
+        return [pscustomobject]@{ status = $supportStatus; support_code = $supportCode }
+    } catch {
+        return [pscustomobject]@{ status = 'fallback'; support_code = $null }
+    }
+}

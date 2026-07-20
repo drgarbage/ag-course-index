@@ -458,3 +458,85 @@ Describe 'Windows Docker Desktop installer' {
         Get-Content $script:InstallerPath -Raw | Should -Not -Match '(?i)Restart-Computer|shutdown\.exe|\bdocker-compose\b'
     }
 }
+
+Describe 'Windows course toolchain optional AI diagnostics' {
+    It 'does not create an AI session for a ready or skipped tool' {
+        $script:aiCalls = 0
+        $supportInvoker = {
+            param($step, $diagnostics)
+            $script:aiCalls++
+            @{ status = 'resolved' }
+        }
+
+        (Resolve-CourseToolchainWindowsFailure -Profile base -Result @{ tool_id = 'node_lts'; status = 'ready' } -SupportInvoker $supportInvoker).status |
+            Should -Be 'not_applicable'
+        (Resolve-CourseToolchainWindowsFailure -Profile base -Result @{ tool_id = 'node_lts'; status = 'skipped' } -SupportInvoker $supportInvoker).status |
+            Should -Be 'not_applicable'
+        $script:aiCalls | Should -Be 0
+    }
+
+    It 'keeps AI offline when the user declines after the local fallback' {
+        $script:aiCalls = 0
+        $messages = [System.Collections.Generic.List[string]]::new()
+
+        $result = Resolve-CourseToolchainWindowsFailure -Profile base -Result @{
+            tool_id = 'git_gh'; status = 'failed'; error_kind = 'git_install';
+            safe_message = 'git failed at C:\Users\Alice\.env with token ghp_fake'
+        } -ConsentProvider { 'n' } -FallbackWriter { param($message) $messages.Add($message) } -SupportInvoker {
+            param($step, $diagnostics)
+            $script:aiCalls++
+            @{ status = 'resolved' }
+        }
+
+        $result.status | Should -Be 'declined'
+        $messages.Count | Should -BeGreaterThan 0
+        ($messages -join "`n") | Should -Not -Match 'ghp_fake|Alice|\.env'
+        $script:aiCalls | Should -Be 0
+    }
+
+    It 'sends only the toolchain-safe diagnostic schema to support' {
+        $script:captured = $null
+
+        Resolve-CourseToolchainWindowsFailure -Profile base -Result @{
+            tool_id = 'git_gh'; status = 'failed'; error_kind = 'network'; found = $false
+            version = 'ghp_fake'; exit_code = 17; restart_required = $true; engine_running = $false
+            safe_message = 'token ghp_fake at C:\\Users\\Alice\\workspace\\.env'
+            env = @{ SECRET = 'nope' }; authorization = 'Bearer nope'; command = 'evil'; url = 'https://evil.invalid'
+        } -ConsentProvider { 'y' } -FallbackWriter {} -SupportInvoker {
+            param($step, $diagnostics)
+            $script:captured = @{ step = $step; diagnostics = $diagnostics }
+            @{ status = 'fallback' }
+        } | Out-Null
+
+        $script:captured.step | Should -Be 'network'
+        @($script:captured.diagnostics.PSObject.Properties.Name) | Should -Be @(
+            'platform', 'step', 'tool_id', 'found', 'version', 'exit_code', 'error_kind', 'restart_required', 'engine_running'
+        )
+        ($script:captured.diagnostics | ConvertTo-Json -Compress) | Should -Not -Match 'ghp_fake|Alice|\.env|SECRET|authorization|evil|url'
+    }
+
+    It 'keeps Node, Docker, and cloudflared on the fixed contact-instructor fallback' {
+        $script:aiCalls = 0
+        foreach ($toolId in @('node_lts', 'cloudflared', 'docker_desktop')) {
+            $result = Resolve-CourseToolchainWindowsFailure -Profile full -Result @{ tool_id = $toolId; status = 'failed'; error_kind = 'unknown' } `
+                -FallbackWriter {} -ConsentProvider { 'y' } -SupportInvoker { $script:aiCalls++; @{ status = 'resolved' } }
+
+            $result.status | Should -Be 'contact_instructor'
+            $result.action_id | Should -Be 'CONTACT_INSTRUCTOR'
+        }
+        $script:aiCalls | Should -Be 0
+    }
+
+    It 'falls back immediately when the existing dispatcher rejects a remote action' {
+        $script:actionCalls = 0
+        $result = Resolve-CourseToolchainWindowsFailure -Profile base -Result @{ tool_id = 'git_gh'; status = 'failed'; error_kind = 'gh_install' } `
+            -ConsentProvider { 'y' } -FallbackWriter {} -SupportInvoker {
+                param($step, $diagnostics)
+                $script:actionCalls++
+                @{ status = 'fallback'; remote_action = @{ id = 'RUN_ARBITRARY_COMMAND'; command = 'evil'; url = 'https://evil.invalid' } }
+            }
+
+        $result.status | Should -Be 'fallback'
+        $script:actionCalls | Should -Be 1
+    }
+}
