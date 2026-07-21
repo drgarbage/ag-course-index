@@ -245,3 +245,166 @@ course_toolchain_macos_support_invoke() {
     esac
   fi
 }
+
+course_toolchain_git_gh_state() {
+  if ! command -v git >/dev/null 2>&1; then
+    macos_json_state git_gh missing
+    return 0
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    macos_json_state git_gh missing
+    return 0
+  fi
+  if ! gh auth status --hostname github.com >/dev/null 2>&1; then
+    macos_json_state git_gh missing
+    return 0
+  fi
+  macos_json_state git_gh ready
+}
+
+read_course_toolchain_profile_input() {
+  local raw="$1" trimmed
+  trimmed="${raw#"${raw%%[![:space:]]*}"}"
+  trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+  trimmed="$(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]')"
+  case "$trimmed" in
+    base|line|data|full) printf '%s\n' "$trimmed" ;;
+    *) return 64 ;;
+  esac
+}
+
+course_toolchain_free_bytes() {
+  if [ -n "${COURSE_TOOLCHAIN_FREE_BYTES_OVERRIDE+x}" ]; then
+    printf '%s\n' "$COURSE_TOOLCHAIN_FREE_BYTES_OVERRIDE"
+    return 0
+  fi
+  df -k / 2>/dev/null | awk 'NR==2 {printf "%.0f\n", $4 * 1024}'
+}
+
+course_toolchain_tool_action_via_provider() {
+  local tool_id="$1" confirmation_provider="$2" git_gh_provider="$3" confirmation
+  case "$tool_id" in
+    git_gh) "$git_gh_provider"; return $? ;;
+    node_lts|cloudflared)
+      confirmation="$("$confirmation_provider" "Install $tool_id")"
+      install_macos_tool "$tool_id" "$confirmation"
+      ;;
+    docker_desktop)
+      confirmation="$("$confirmation_provider" 'Install Docker Desktop')"
+      install_course_toolchain_macos_docker_desktop "$confirmation"
+      ;;
+    antigravity|vscode|browser)
+      confirmation="$("$confirmation_provider" "Install $tool_id")"
+      install_course_toolchain_macos_gui_tool "$tool_id" "$confirmation"
+      ;;
+    *) macos_json_state "$tool_id" failed; return 64 ;;
+  esac
+}
+
+course_toolchain_prompt_profile() {
+  printf '%s' 'Select a profile (base/line/data/full): ' >&2
+  read -r REPLY
+  printf '%s\n' "$REPLY"
+}
+
+course_toolchain_prompt_gui_tools() {
+  printf '%s' 'Optional GUI tools, comma separated (antigravity,vscode,browser) or blank: ' >&2
+  read -r REPLY
+  printf '%s\n' "$REPLY"
+}
+
+course_toolchain_prompt_confirmation() {
+  local message="$1" answer
+  printf '%s' "$message [y/N] " >&2
+  read -r answer
+  case "$answer" in y|Y|yes|YES) printf 'yes\n' ;; *) printf 'no\n' ;; esac
+}
+
+course_toolchain_macos_default_writer() { printf '%s\n' "$1"; }
+
+course_toolchain_macos_default_failure_resolver() {
+  resolve_course_toolchain_macos_failure "$1" "$2" >/dev/null
+}
+
+print_course_toolchain_macos_report() {
+  local report_json="$1"
+  python3 - "$report_json" <<'PY'
+import json
+import sys
+
+report = json.loads(sys.argv[1])
+print(f"\nCourse toolchain readiness (profile: {report['profile']})")
+for tool in report['tools']:
+    version = tool.get('version') or '-'
+    print(f"  [{tool['requirement']}] {tool['tool_id']} ({version}) - {tool['status']}")
+disk = report['disk']
+print(f"Disk: {disk['status']} (free={disk['free_bytes']}, required={disk['required_bytes']})")
+print(f"Ready: {report['ready']}")
+print(f"Next step: {report['next_step']}")
+PY
+}
+
+start_course_toolchain_installer() {
+  local profile_provider="${1:-course_toolchain_prompt_profile}"
+  local gui_provider="${2:-course_toolchain_prompt_gui_tools}"
+  local confirmation_provider="${3:-course_toolchain_prompt_confirmation}"
+  local git_gh_provider="${4:-course_toolchain_git_gh_state}"
+  local free_bytes_provider="${5:-course_toolchain_free_bytes}"
+  local writer="${6:-course_toolchain_macos_default_writer}"
+  local failure_resolver="${7:-course_toolchain_macos_default_failure_resolver}"
+  local tool_action_invoker="${8:-course_toolchain_tool_action_via_provider}"
+
+  local profile="" raw_profile
+  while [ -z "$profile" ]; do
+    raw_profile="$("$profile_provider")"
+    if profile="$(read_course_toolchain_profile_input "$raw_profile")"; then
+      :
+    else
+      "$writer" 'Unknown profile. Choose one of: base, line, data, full.'
+      profile=""
+    fi
+  done
+
+  local raw_gui
+  raw_gui="$("$gui_provider")"
+
+  local plan_tools tool_id result status results_json='[]'
+  plan_tools="$(get_course_toolchain_plan "$profile" "$raw_gui")" || return 64
+
+  while IFS= read -r tool_id; do
+    [ -n "$tool_id" ] || continue
+    "$writer" "== $tool_id =="
+    result="$("$tool_action_invoker" "$tool_id" "$confirmation_provider" "$git_gh_provider")"
+    results_json="$(python3 -c '
+import json, sys
+arr = json.loads(sys.argv[1])
+arr.append(json.loads(sys.argv[2]))
+print(json.dumps(arr))
+' "$results_json" "$result")"
+
+    status="$(python3 -c '
+import json, sys
+try:
+    value = json.loads(sys.argv[1]).get("status", "")
+except (TypeError, ValueError):
+    value = ""
+print(value if isinstance(value, str) else "")
+' "$result")"
+    if [ "$status" = failed ]; then
+      "$failure_resolver" "$profile" "$result"
+    fi
+    if [ "$tool_id" = git_gh ] && [ "$status" != ready ]; then
+      "$writer" 'Git/GitHub 尚未就緒，請先執行 docs/guides/git-and-gh.md 的安裝器，再重新執行本安裝器。'
+    fi
+  done <<< "$plan_tools"
+
+  local free_bytes report
+  free_bytes="$("$free_bytes_provider")"
+  report="$(render_toolchain_report "$profile" "$results_json" "$free_bytes")" || return 1
+  print_course_toolchain_macos_report "$report"
+  printf '%s\n' "$report"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  start_course_toolchain_installer "$@"
+fi
