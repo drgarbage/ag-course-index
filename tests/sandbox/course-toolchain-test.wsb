@@ -1,0 +1,17 @@
+﻿<Configuration>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>D:\02.Projects\ai-class-agexamples\ag-course-index</HostFolder>
+      <SandboxFolder>C:\ag-course-index</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>D:\02.Projects\ai-class-agexamples\ag-course-index\tests\sandbox\shared</HostFolder>
+      <SandboxFolder>C:\shared</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -ExecutionPolicy Bypass -File C:\ag-course-index\tests\sandbox\sandbox-init.ps1</Command>
+  </LogonCommand>
+</Configuration>

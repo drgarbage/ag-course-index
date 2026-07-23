@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $script:InstallerPath = Join-Path $PSScriptRoot '../../scripts/install-git-gh-windows.ps1'
     $tokens = $null
     $errors = $null
@@ -332,3 +332,4 @@ Describe 'Versioned local install patterns' {
         }
     }
 }
+
