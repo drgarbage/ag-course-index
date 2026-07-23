@@ -540,3 +540,27 @@ toolchain_test_unknown_action() {
   [[ "$output" != *RUN_ARBITRARY_COMMAND* ]]
   [[ "$output" != *evil.invalid* ]]
 }
+
+@test "macOS validates localization manifest and hashes" {
+  load_macos_module
+  temp_vendor="$BATS_TEST_TMPDIR/vendor_test"
+  mkdir -p "$temp_vendor/dicts_tw"
+  
+  printf '%s\n' '{"commit":"hash","files":[{"path":"dicts_tw/test.json","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}]}' > "$temp_vendor/manifest.json"
+  touch "$temp_vendor/dicts_tw/test.json"
+
+  run macos_vendor_localization_manifest_verify "$temp_vendor"
+  [ "$status" -eq 0 ]
+
+  printf 'hello' > "$temp_vendor/dicts_tw/test.json"
+  run macos_vendor_localization_manifest_verify "$temp_vendor"
+  [ "$status" -ne 0 ]
+}
+
+@test "macOS localization install requires confirmation" {
+  load_macos_module
+  run install_macos_localization vscode no
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"skipped"'* ]]
+}
+

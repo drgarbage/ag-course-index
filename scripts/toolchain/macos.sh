@@ -408,3 +408,114 @@ install_macos_docker_desktop() (
   /usr/bin/open "$MACOS_DOCKER_DESKTOP_APP_PATH" || { macos_json_state docker_desktop failed; return 1; }
   wait_macos_docker_ready "$MACOS_DOCKER_READY_TIMEOUT_SECONDS"
 )
+
+macos_vendor_localization_manifest_verify() {
+  local vendor_dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../vendor/antigravity2-cn}"
+  python3 - "$vendor_dir" <<'PY'
+import json
+import hashlib
+import os
+import sys
+
+vendor_dir = sys.argv[1]
+manifest_path = os.path.join(vendor_dir, "manifest.json")
+if not os.path.exists(manifest_path):
+    sys.exit(1)
+
+try:
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+except Exception:
+    sys.exit(1)
+
+for file_info in manifest.get("files", []):
+    file_path = os.path.join(vendor_dir, file_info["path"])
+    if not os.path.exists(file_path):
+        sys.exit(1)
+    
+    sha256 = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                sha256.update(chunk)
+    except Exception:
+        sys.exit(1)
+    
+    if sha256.hexdigest().lower() != file_info["sha256"].lower():
+        sys.exit(1)
+
+sys.exit(0)
+PY
+}
+
+install_macos_localization() {
+  local target="$1" confirmation="$2"
+  case "$target" in
+    vscode|antigravity_ide|antigravity_app) ;;
+    *) return 64 ;;
+  esac
+
+  if [ "$confirmation" != yes ]; then
+    macos_json_state "$target" skipped
+    return 0
+  fi
+
+  if [ "$target" = "vscode" ]; then
+    if [ ! -d "$MACOS_VSCODE_APP_PATH" ] && ! command -v code >/dev/null 2>&1; then
+      macos_json_state vscode failed
+      return 0
+    fi
+    local code_cmd="code"
+    if ! command -v code >/dev/null 2>&1; then
+      code_cmd="/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+    fi
+    if ! "$code_cmd" --install-extension MS-CEINTL.vscode-language-pack-zh-hant >/dev/null 2>&1; then
+      macos_json_state vscode failed
+      return 0
+    fi
+    macos_json_state vscode ready
+    return 0
+  fi
+
+  if [ "$target" = "antigravity_ide" ]; then
+    if [ ! -d "$MACOS_ANTIGRAVITY_APP_PATH" ] && ! command -v antigravity >/dev/null 2>&1; then
+      macos_json_state antigravity_ide failed
+      return 0
+    fi
+    local ag_cmd="antigravity"
+    if ! command -v antigravity >/dev/null 2>&1; then
+      ag_cmd="/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity"
+    fi
+    if ! "$ag_cmd" --install-extension MS-CEINTL.vscode-language-pack-zh-hant >/dev/null 2>&1; then
+      macos_json_state antigravity_ide failed
+      return 0
+    fi
+    macos_json_state antigravity_ide ready
+    return 0
+  fi
+
+  if [ "$target" = "antigravity_app" ]; then
+    if [ ! -d "$MACOS_ANTIGRAVITY_APP_PATH" ]; then
+      macos_json_state antigravity_app failed
+      return 0
+    fi
+    if ! macos_vendor_localization_manifest_verify; then
+      macos_json_state antigravity_app failed
+      return 0
+    fi
+    if ! command -v node >/dev/null 2>&1; then
+      macos_json_state antigravity_app failed
+      return 0
+    fi
+    
+    local vendor_dir
+    vendor_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../vendor/antigravity2-cn"
+    if ! node "$vendor_dir/localization_engine.js" --tw --brand-title translated >/dev/null 2>&1; then
+      macos_json_state antigravity_app failed
+      return 0
+    fi
+    macos_json_state antigravity_app ready
+    return 0
+  fi
+}
+

@@ -47,8 +47,8 @@
 * [Google 帳號註冊指引](docs/guides/google-account.md)
 * [Antigravity 2.0 與 Antigravity IDE 安裝指引](docs/guides/antigravity.md)
 * [GitHub 帳號註冊指引](docs/guides/github-account.md)
-* **Git 與 GitHub CLI 一鍵安裝**：請先完成 GitHub 帳號註冊，再依平台執行安裝程式
-  * [安裝說明與平台選擇](docs/guides/git-and-gh.md)
-  * [Windows：PowerShell 一行指令安裝](docs/guides/git-and-gh-windows.md)
-  * [macOS：終端機一行指令安裝](docs/guides/git-and-gh-macos.md)
+* **課程開發環境一鍵安裝器**：
+  * [Windows：課程環境與中文化整合安裝 (推薦)](docs/guides/course-toolchain-windows.md)
+  * [macOS：課程環境與中文化整合安裝 (推薦)](docs/guides/course-toolchain-macos.md)
+  * [Git 與 GitHub CLI 安裝說明與平台選擇 (通用)](docs/guides/git-and-gh.md)
 * [Visual Studio Code 安裝指引](docs/guides/visual-studio-code.md)

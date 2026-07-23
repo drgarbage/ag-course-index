@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $script:PlannerPath = Join-Path $PSScriptRoot '../../scripts/course-toolchain-windows.ps1'
     $script:InstallerPath = Join-Path $PSScriptRoot '../../scripts/toolchain/windows.ps1'
     $script:ReportPath = Join-Path $PSScriptRoot '../../scripts/toolchain/report.ps1'
@@ -538,5 +538,122 @@ Describe 'Windows course toolchain optional AI diagnostics' {
 
         $result.status | Should -Be 'fallback'
         $script:actionCalls | Should -Be 1
+    }
+}
+
+Describe 'Windows toolchain localization module' {
+    BeforeAll {
+        $script:TempVendorDir = Join-Path $TestDrive 'vendor_test'
+        New-Item -ItemType Directory -Path $script:TempVendorDir -Force | Out-Null
+    }
+
+    It 'validates a compliant manifest and file hashes' {
+        $manifest = @{
+            commit = 'pinned_hash'
+            files = @(
+                @{ path = 'file1.js'; sha256 = '8bc861df4008bc504a9d7d3d4b68db652bca30c88c7f99996e30bba9e89d1234' }
+            )
+        }
+        $manifestJson = $manifest | ConvertTo-Json -Depth 5
+        Set-Content -Path (Join-Path $script:TempVendorDir 'manifest.json') -Value $manifestJson
+
+        $resMissing = Test-WindowsLocalizationManifest -VendorDir $script:TempVendorDir -HashVerifier { '8bc861df4008bc504a9d7d3d4b68db652bca30c88c7f99996e30bba9e89d1234' } -PathProbe {
+            param($path)
+            if ($path -like '*manifest.json') { return $true }
+            return $false
+        }
+        $resMissing | Should -BeFalse
+
+        $resWrongHash = Test-WindowsLocalizationManifest -VendorDir $script:TempVendorDir -HashVerifier { 'wrong_hash' } -PathProbe {
+            param($path)
+            return $true
+        }
+        $resWrongHash | Should -BeFalse
+
+        $resCorrect = Test-WindowsLocalizationManifest -VendorDir $script:TempVendorDir -HashVerifier { '8bc861df4008bc504a9d7d3d4b68db652bca30c88c7f99996e30bba9e89d1234' } -PathProbe {
+            param($path)
+            return $true
+        }
+        $resCorrect | Should -BeTrue
+    }
+
+    It 'skips installation if not confirmed' {
+        $res = Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$false
+        $res.status | Should -Be 'skipped'
+    }
+
+    It 'fails when target app is missing' {
+        $res = Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true -AppProbe { $false }
+        $res.status | Should -Be 'failed'
+        $res.reason | Should -Be 'vscode_missing'
+    }
+
+    It 'installs VS Code language pack extension when app is present' {
+        $script:calledCmd = $null
+        $script:calledArgs = $null
+        $res = Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true `
+            -AppProbe { $true } `
+            -CommandRunner {
+                param($cmd, $arguments)
+                $script:calledCmd = $cmd
+                $script:calledArgs = $arguments
+                [pscustomobject]@{ exit_code = 0 }
+            }
+        $res.status | Should -Be 'ready'
+        $script:calledCmd | Should -Be 'code'
+        $script:calledArgs | Should -Be @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
+    }
+
+    It 'installs Antigravity IDE language pack extension when app is present' {
+        $script:calledCmd = $null
+        $script:calledArgs = $null
+        $res = Invoke-WindowsLocalizationInstall -Target 'antigravity_ide' -Confirmed:$true `
+            -AppProbe { $true } `
+            -CommandRunner {
+                param($cmd, $arguments)
+                $script:calledCmd = $cmd
+                $script:calledArgs = $arguments
+                [pscustomobject]@{ exit_code = 0 }
+            }
+        $res.status | Should -Be 'ready'
+        $script:calledCmd | Should -Be 'antigravity'
+        $script:calledArgs | Should -Be @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
+    }
+
+    It 'installs Antigravity 2.0 app patch with verification and confirmation gate' {
+        $script:calledCmd = $null
+        $script:calledArgs = $null
+        $script:confirmationAsked = $false
+        
+        $resHashFail = Invoke-WindowsLocalizationInstall -Target 'antigravity_app' -Confirmed:$true `
+            -AppProbe { $true } `
+            -HashVerifier { $false }
+        $resHashFail.status | Should -Be 'failed'
+        $resHashFail.reason | Should -Be 'hash_verification_failed'
+
+        $resConfDeclined = Invoke-WindowsLocalizationInstall -Target 'antigravity_app' -Confirmed:$true `
+            -AppProbe { $true } `
+            -HashVerifier { $true } `
+            -ConfirmationProvider { $false }
+        $resConfDeclined.status | Should -Be 'skipped'
+
+        Mock Get-Command { [pscustomobject]@{ Name = 'node' } } -ParameterFilter { $Name -eq 'node' }
+
+        $resSuccess = Invoke-WindowsLocalizationInstall -Target 'antigravity_app' -Confirmed:$true `
+            -AppProbe { $true } `
+            -HashVerifier { $true } `
+            -ConfirmationProvider { $script:confirmationAsked = $true; $true } `
+            -CommandRunner {
+                param($cmd, $arguments)
+                $script:calledCmd = $cmd
+                $script:calledArgs = $arguments
+                [pscustomobject]@{ exit_code = 0 }
+            }
+        
+        $script:confirmationAsked | Should -BeTrue
+        $script:calledCmd | Should -Be 'node'
+        $script:calledArgs[0] | Should -Match 'localization_engine.js$'
+        $script:calledArgs[1..3] | Should -Be @('--tw', '--brand-title', 'translated')
+        $resSuccess.status | Should -Be 'ready'
     }
 }

@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 $script:WindowsPackageCatalog = @{
     node_lts = @{ id = 'OpenJS.NodeJS.LTS'; verify = @('node', '--version'); minimum_version = '24.4.0' }
@@ -446,3 +446,144 @@ function Invoke-WindowsGuiToolInstall {
     if ([bool](& $AppProbe $ToolId)) { return [pscustomobject]@{ tool_id = $ToolId; status = 'installed' } }
     return [pscustomobject]@{ tool_id = $ToolId; status = 'needs_restart' }
 }
+
+function ConvertTo-WindowsLocalizationHashtable {
+    param([Parameter(Mandatory)][AllowNull()][object]$InputObject)
+
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $result = @{}
+        foreach ($property in $InputObject.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-WindowsLocalizationHashtable $property.Value
+        }
+        return $result
+    }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        $result = @{}
+        foreach ($key in @($InputObject.Keys)) {
+            $result[$key] = ConvertTo-WindowsLocalizationHashtable $InputObject[$key]
+        }
+        return $result
+    }
+    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+        return @(foreach ($item in $InputObject) { ConvertTo-WindowsLocalizationHashtable $item })
+    }
+    return $InputObject
+}
+
+function Test-WindowsLocalizationManifest {
+    param(
+        [string]$VendorDir = (Join-Path $PSScriptRoot '../vendor/antigravity2-cn'),
+        [scriptblock]$HashVerifier = {
+            param($filePath)
+            if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { return $null }
+            (Get-FileHash -Path $filePath -Algorithm SHA256).Hash.ToLower()
+        },
+        [scriptblock]$PathProbe = { param($path) Test-Path -LiteralPath $path -PathType Leaf }
+    )
+
+    $manifestPath = Join-Path $VendorDir 'manifest.json'
+    if (-not (& $PathProbe $manifestPath)) {
+        return $false
+    }
+    try {
+        $content = Get-Content -LiteralPath $manifestPath -Raw
+        $parsed = ConvertFrom-Json $content
+        $manifest = ConvertTo-WindowsLocalizationHashtable $parsed
+    } catch {
+        return $false
+    }
+    if ($null -eq $manifest -or $null -eq $manifest.files) {
+        return $false
+    }
+    foreach ($file in $manifest.files) {
+        $filePath = Join-Path $VendorDir $file.path
+        if (-not (& $PathProbe $filePath)) {
+            return $false
+        }
+        $calculatedHash = & $HashVerifier $filePath
+        if ($calculatedHash -cne $file.sha256) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Invoke-WindowsLocalizationInstall {
+    param(
+        [Parameter(Mandatory)][ValidateSet('vscode', 'antigravity_ide', 'antigravity_app')][string]$Target,
+        [Parameter(Mandatory)][bool]$Confirmed,
+        [scriptblock]$ConfirmationProvider = {
+            param($message)
+            (Read-Host "$message [y/N]") -match '^(?i:y|yes)$'
+        },
+        [scriptblock]$HashVerifier = {
+            param($dir)
+            Test-WindowsLocalizationManifest -VendorDir $dir
+        },
+        [scriptblock]$CommandRunner = {
+            param($command, $arguments)
+            try {
+                $output = & $command @arguments 2>&1
+                $exitCode = if ($?) { [int]$LASTEXITCODE } else { 0 }
+            } catch {
+                $exitCode = 1
+            }
+            [pscustomobject]@{ exit_code = $exitCode }
+        },
+        [scriptblock]$AppProbe = {
+            param($toolId)
+            Test-WindowsGuiToolInstalled -ToolId $toolId
+        }
+    )
+
+    if (-not $Confirmed) {
+        return [pscustomobject]@{ target = $Target; status = 'skipped' }
+    }
+
+    if ($Target -eq 'vscode') {
+        if (-not (& $AppProbe 'vscode')) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'vscode_missing' }
+        }
+        $res = & $CommandRunner 'code' @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
+        if ($res.exit_code -ne 0) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'install_failed' }
+        }
+        return [pscustomobject]@{ target = $Target; status = 'ready' }
+    }
+
+    if ($Target -eq 'antigravity_ide') {
+        if (-not (& $AppProbe 'antigravity')) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'antigravity_missing' }
+        }
+        $res = & $CommandRunner 'antigravity' @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
+        if ($res.exit_code -ne 0) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'install_failed' }
+        }
+        return [pscustomobject]@{ target = $Target; status = 'ready' }
+    }
+
+    if ($Target -eq 'antigravity_app') {
+        if (-not (& $AppProbe 'antigravity')) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'antigravity_missing' }
+        }
+        $vendorDir = Join-Path $PSScriptRoot '../vendor/antigravity2-cn'
+        $verified = & $HashVerifier $vendorDir
+        if (-not $verified) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'hash_verification_failed' }
+        }
+        if (-not (& $ConfirmationProvider '警告：即將執行 Antigravity 2.0 中文化修改。確認要繼續嗎？')) {
+            return [pscustomobject]@{ target = $Target; status = 'skipped' }
+        }
+        if (-not (Get-Command 'node' -ErrorAction SilentlyContinue)) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'node_missing' }
+        }
+        $scriptPath = Join-Path $vendorDir 'localization_engine.js'
+        $res = & $CommandRunner 'node' @($scriptPath, '--tw', '--brand-title', 'translated')
+        if ($res.exit_code -ne 0) {
+            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'engine_failed' }
+        }
+        return [pscustomobject]@{ target = $Target; status = 'ready' }
+    }
+}
+

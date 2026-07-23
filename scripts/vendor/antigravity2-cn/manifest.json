@@ -1,0 +1,33 @@
+﻿{
+    "commit":  "497b71f2114715d96742a71bca5d630b2f99b559",
+    "files":  [
+                  {
+                      "sha256":  "940d32c1a709854758c0146378c50dd92f29578c3197c75ff365d01cf0dfff0a",
+                      "path":  "localization_engine.js"
+                  },
+                  {
+                      "sha256":  "46e28f5b6154134b95d01dcd4ee32a0020233eb2c9602476b72653a9da645a7e",
+                      "path":  "dicts_tw/common.json"
+                  },
+                  {
+                      "sha256":  "f34bff788b3bf060dc3083e9a2c4629cd96cd1300ebc2236ebbbe9dc92e3064e",
+                      "path":  "dicts_tw/menu_nav.json"
+                  },
+                  {
+                      "sha256":  "5322eebd8f9c1782a9239666a5bcd7e64cab3eecc7ae81f44d13ec575f91ea97",
+                      "path":  "dicts_tw/page_agents.json"
+                  },
+                  {
+                      "sha256":  "fd267eb33d749bd3dd607bad1187cb7df8be695e965d9e89edaef65991a1f994",
+                      "path":  "dicts_tw/page_mcp_knowledge.json"
+                  },
+                  {
+                      "sha256":  "1ac85e0e739e363e4b3f34a41723db8516c6fdd7e2473b434efc3bfbd8b3d714",
+                      "path":  "dicts_tw/page_settings.json"
+                  },
+                  {
+                      "sha256":  "1816dccec179a2a2db7933c247f45d13b4d2aa881d5a90ba39aaf64693e0d251",
+                      "path":  "dicts_tw/page_workspaces.json"
+                  }
+              ]
+}
