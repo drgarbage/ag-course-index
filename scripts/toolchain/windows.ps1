@@ -42,7 +42,29 @@ function Test-WindowsGuiToolInstalled {
     if (-not (@($script:WindowsGuiPackageCatalog.Keys) -ccontains $ToolId)) { throw "Unknown Windows GUI tool: $ToolId" }
     switch ($ToolId) {
         'antigravity' {
-            return [bool](& $PathProbe 'C:\Program Files\Antigravity\Antigravity.exe') -or [bool](& $CommandLookup 'antigravity')
+            $userLocal = $env:LOCALAPPDATA
+            $systemFiles = $env:ProgramFiles
+            $systemFilesX86 = ${env:ProgramFiles(x86)}
+            
+            $paths = @(
+                "C:\Program Files\Antigravity\Antigravity.exe",
+                "C:\Program Files\Antigravity IDE\Antigravity IDE.exe",
+                "$userLocal\Programs\Antigravity\Antigravity.exe",
+                "$userLocal\Programs\Antigravity IDE\Antigravity IDE.exe"
+            )
+            if ($systemFiles) {
+                $paths += "$systemFiles\Antigravity\Antigravity.exe"
+                $paths += "$systemFiles\Antigravity IDE\Antigravity IDE.exe"
+            }
+            if ($systemFilesX86) {
+                $paths += "$systemFilesX86\Antigravity\Antigravity.exe"
+                $paths += "$systemFilesX86\Antigravity IDE\Antigravity IDE.exe"
+            }
+
+            foreach ($p in $paths) {
+                if (& $PathProbe $p) { return $true }
+            }
+            return [bool](& $CommandLookup 'antigravity') -or [bool](& $CommandLookup 'antigravity-ide')
         }
         'vscode' {
             return [bool](& $PathProbe 'C:\Program Files\Microsoft VS Code\Code.exe') -or [bool](& $CommandLookup 'code')
@@ -388,6 +410,26 @@ function Invoke-WindowsToolInstall {
     $definition = Get-WindowsToolDefinition -ToolId $ToolId
     if (-not $Confirmed) {
         return [pscustomobject]@{ tool_id = $ToolId; status = 'skipped' }
+    }
+
+    # NVM Support for Node.js LTS
+    if ($ToolId -eq 'node_lts' -and [bool](& $CommandLookup 'nvm')) {
+        $nvmVersion = '24.18.0'
+        try {
+            & nvm install $nvmVersion
+            & nvm use $nvmVersion
+        } catch {
+            return [pscustomobject]@{ tool_id = $ToolId; status = 'failed'; reason = 'nvm_install_failed' }
+        }
+        Refresh-WindowsProcessPath
+        $state = Get-WindowsToolState -ToolId $ToolId -CommandLookup $CommandLookup -VersionRunner $VersionRunner
+        if ($state.status -eq 'ready') {
+            return [pscustomobject]@{ tool_id = $ToolId; status = 'ready' }
+        }
+        if ($state.status -eq 'outdated') {
+            return [pscustomobject]@{ tool_id = $ToolId; status = 'needs_restart' }
+        }
+        return [pscustomobject]@{ tool_id = $ToolId; status = 'failed'; reason = 'verification_failed' }
     }
 
     $wingetCheck = & $PackageRunner 'winget' @('--version')

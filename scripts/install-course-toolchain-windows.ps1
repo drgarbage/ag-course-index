@@ -15,10 +15,13 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 
 $PSScriptRootVal = $PSScriptRoot
 if (-not $PSScriptRootVal) {
-    # Running in memory (e.g., via Invoke-Expression). Create a temp dir and download dependencies.
+    # Running in memory (e.g., via Invoke-Expression). Create a temp dir and copy or download dependencies.
     $tempDir = Join-Path $env:TEMP "course-toolchain-installer-$(Get-Random)"
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
     $PSScriptRootVal = $tempDir
+    
+    $localScriptsDir = Join-Path (Get-Location) "scripts"
+    $useLocal = (Test-Path (Join-Path $localScriptsDir "course-toolchain-windows.ps1"))
     
     $baseUrl = "https://raw.githubusercontent.com/drgarbage/ag-course-index/main/scripts"
     
@@ -37,29 +40,57 @@ if (-not $PSScriptRootVal) {
         if (-not (Test-Path $destDir)) {
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
         }
-        $url = "$baseUrl/$file"
-        Invoke-RestMethod -Uri $url -OutFile $destPath
-    }
-    
-    # Download vendor localization manifest and dicts
-    $manifestUrl = "$baseUrl/vendor/antigravity2-cn/manifest.json"
-    $manifestPath = Join-Path $tempDir "vendor/antigravity2-cn/manifest.json"
-    $manifestDir = Split-Path $manifestPath
-    if (-not (Test-Path $manifestDir)) {
-        New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
-    }
-    Invoke-RestMethod -Uri $manifestUrl -OutFile $manifestPath
-    
-    $manifestContent = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
-    foreach ($fileObj in $manifestContent.files) {
-        $filePath = $fileObj.path
-        $fileUrl = "$baseUrl/vendor/antigravity2-cn/$filePath"
-        $fileDest = Join-Path $tempDir "vendor/antigravity2-cn/$filePath"
-        $fileDestDir = Split-Path $fileDest
-        if (-not (Test-Path $fileDestDir)) {
-            New-Item -ItemType Directory -Path $fileDestDir -Force | Out-Null
+        
+        if ($useLocal) {
+            $srcPath = Join-Path $localScriptsDir $file
+            Copy-Item -Path $srcPath -Destination $destPath -Force
+        } else {
+            $url = "$baseUrl/$file"
+            Invoke-RestMethod -Uri $url -OutFile $destPath
         }
-        Invoke-RestMethod -Uri $fileUrl -OutFile $fileDest
+    }
+    
+    # Download or copy vendor localization manifest and dicts
+    if ($useLocal) {
+        $srcManifest = Join-Path $localScriptsDir "vendor/antigravity2-cn/manifest.json"
+        $destManifest = Join-Path $tempDir "vendor/antigravity2-cn/manifest.json"
+        $destDir = Split-Path $destManifest
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+        Copy-Item -Path $srcManifest -Destination $destManifest -Force
+        
+        $manifestContent = Get-Content -Raw -Path $destManifest | ConvertFrom-Json
+        foreach ($fileObj in $manifestContent.files) {
+            $filePath = $fileObj.path
+            $srcFile = Join-Path $localScriptsDir "vendor/antigravity2-cn/$filePath"
+            $destFile = Join-Path $tempDir "vendor/antigravity2-cn/$filePath"
+            $destFileDir = Split-Path $destFile
+            if (-not (Test-Path $destFileDir)) {
+                New-Item -ItemType Directory -Path $destFileDir -Force | Out-Null
+            }
+            Copy-Item -Path $srcFile -Destination $destFile -Force
+        }
+    } else {
+        $manifestUrl = "$baseUrl/vendor/antigravity2-cn/manifest.json"
+        $manifestPath = Join-Path $tempDir "vendor/antigravity2-cn/manifest.json"
+        $manifestDir = Split-Path $manifestPath
+        if (-not (Test-Path $manifestDir)) {
+            New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
+        }
+        Invoke-RestMethod -Uri $manifestUrl -OutFile $manifestPath
+        
+        $manifestContent = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+        foreach ($fileObj in $manifestContent.files) {
+            $filePath = $fileObj.path
+            $fileUrl = "$baseUrl/vendor/antigravity2-cn/$filePath"
+            $fileDest = Join-Path $tempDir "vendor/antigravity2-cn/$filePath"
+            $fileDestDir = Split-Path $fileDest
+            if (-not (Test-Path $fileDestDir)) {
+                New-Item -ItemType Directory -Path $fileDestDir -Force | Out-Null
+            }
+            Invoke-RestMethod -Uri $fileUrl -OutFile $fileDest
+        }
     }
 }
 
@@ -159,10 +190,21 @@ function Get-EnvironmentReadiness {
     # 4. docker_desktop
     try {
         $dockerReady = (Test-WindowsDockerReady).status -eq 'ready'
-        $dockerStatus = if ($dockerReady) { 'ready' } else { 'missing' }
-        $results += [pscustomobject]@{ tool_id = 'docker_desktop'; status = $dockerStatus }
+        if ($dockerReady) {
+            $results += [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'ready' }
+        } else {
+            if (Get-Command 'docker' -ErrorAction SilentlyContinue) {
+                $results += [pscustomobject]@{
+                    tool_id = 'docker_desktop'
+                    status = 'failed'
+                    safe_message = '偵測到 Docker Desktop 已經安裝，但 Docker 守護行程（daemon）尚未啟動，請手動開啟 Docker Desktop 應用程式。'
+                }
+            } else {
+                $results += [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; safe_message = '未偵測到 Docker Desktop，請執行安裝。' }
+            }
+        }
     } catch {
-        $results += [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed' }
+        $results += [pscustomobject]@{ tool_id = 'docker_desktop'; status = 'failed'; safe_message = '檢查 Docker Desktop 狀態時發生錯誤。' }
     }
 
     # 5. GUI tools
@@ -209,6 +251,9 @@ function Show-ReadinessReport {
             Write-Host " (版本: $($tool.version))" -NoNewline
         }
         Write-Host ""
+        if ($tool.tool_id -eq 'node_lts' -and $tool.status -eq 'failed' -and (Get-Command 'nvm' -ErrorAction SilentlyContinue)) {
+            Write-Host "   提示: 偵測到您系統中安裝了 NVM for Windows。WinGet 安裝的 Node 可能被 NVM 覆蓋。請手動執行 'nvm install 24.18.0' 與 'nvm use 24.18.0' 切換版本。" -ForegroundColor Yellow
+        }
         if ($tool.safe_message) {
             Write-Host "   備註: $($tool.safe_message)" -ForegroundColor DarkGray
         }
@@ -291,7 +336,7 @@ function Install-Custom {
         return
     }
     
-    $parts = $selection.Split(',; ') | Where-Object { $_ -match '^[1-6]$' }
+    $parts = @($selection.Split(',; ') | Where-Object { $_ -match '^[1-6]$' })
     if ($parts.Count -eq 0) {
         Write-Host "無效的選擇，返回選單。"
         return
@@ -356,6 +401,7 @@ if ($NonInteractive) {
 }
 
 # Main Loop
+$running = $true
 do {
     Show-Menu
     $choice = Read-Host "請輸入選擇編號 (1-4)"
@@ -374,11 +420,11 @@ do {
         }
         "4" {
             Write-Host "感謝使用，再見！"
-            break
+            $running = $false
         }
         default {
             Write-Host "無效的選擇，請輸入 1-4 之間的數字。" -ForegroundColor Red
             Start-Sleep -Seconds 1
         }
     }
-} while ($true)
+} while ($running)

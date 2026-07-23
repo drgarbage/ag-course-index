@@ -326,6 +326,22 @@ Describe 'Windows Node.js and Cloudflare toolchain installer' {
         { Invoke-WindowsToolInstall -ToolId RUN_COMMAND -Confirmed:$true } | Should -Throw
         (Get-Content $script:InstallerPath -Raw) | Should -Not -Match 'Invoke-Expression|\biex\b'
     }
+
+    It 'uses NVM to install Node when NVM is present' {
+        $script:nvmCalls = @()
+        Mock nvm {
+            param([string]$cmd, [string]$version)
+            $script:nvmCalls += "$cmd $version"
+        }
+        
+        $result = Invoke-WindowsToolInstall -ToolId node_lts -Confirmed:$true -CommandLookup {
+            param($cmd)
+            $cmd -in @('nvm', 'node')
+        } -VersionRunner { 'v24.18.0' }
+
+        $result.status | Should -Be 'ready'
+        $script:nvmCalls | Should -Be @('install 24.18.0', 'use 24.18.0')
+    }
 }
 
 Describe 'Windows Docker Desktop installer' {

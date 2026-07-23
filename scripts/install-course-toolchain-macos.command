@@ -70,10 +70,19 @@ get_environment_readiness_json() {
   
   # 4. docker_desktop
   local docker_status="missing"
+  local docker_msg=""
   if verify_macos_docker >/dev/null 2>&1; then
     docker_status="ready"
+  else
+    if command -v docker >/dev/null 2>&1; then
+      docker_status="failed"
+      docker_msg="偵測到 Docker Desktop 已經安裝，但 Docker 守護行程（daemon）尚未啟動，請手動開啟 Docker Desktop 應用程式。"
+    else
+      docker_status="failed"
+      docker_msg="未偵測到 Docker Desktop，請執行安裝。"
+    fi
   fi
-  results+=',{"tool_id":"docker_desktop","status":"'"$docker_status"'"}'
+  results+=',{"tool_id":"docker_desktop","status":"'"$docker_status"'","safe_message":"'"$docker_msg"'"}'
   
   # 5. GUI tools
   for gui_id in antigravity vscode browser; do
