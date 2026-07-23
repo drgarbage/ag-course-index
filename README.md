@@ -47,7 +47,9 @@
 * [Google 帳號註冊指引](docs/guides/google-account.md)
 * [Antigravity 2.0 與 Antigravity IDE 安裝指引](docs/guides/antigravity.md)
 * [GitHub 帳號註冊指引](docs/guides/github-account.md)
-* **Git 與 GitHub CLI 一鍵安裝**：請先完成 GitHub 帳號註冊，再依平台執行安裝程式
+* **課程工具鏈一鍵安裝（推薦）**：請先完成 GitHub 帳號註冊，再依平台執行安裝程式，依課程週次選擇 profile 安裝 Git/GitHub CLI、Node.js/npm、Cloudflare Tunnel、Docker 等工具
+  * [安裝說明與平台選擇](docs/guides/course-toolchain.md)
+* **Git 與 GitHub CLI 一鍵安裝**：若只需要單獨修復 Git／GitHub CLI 設定，可個別執行
   * [安裝說明與平台選擇](docs/guides/git-and-gh.md)
   * [Windows：PowerShell 一行指令安裝](docs/guides/git-and-gh-windows.md)
   * [macOS：終端機一行指令安裝](docs/guides/git-and-gh-macos.md)

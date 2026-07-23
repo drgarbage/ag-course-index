@@ -540,3 +540,93 @@ Describe 'Windows course toolchain optional AI diagnostics' {
         $script:actionCalls | Should -Be 1
     }
 }
+
+Describe 'Course toolchain interactive entry point' {
+    It 'normalizes and validates profile input' {
+        Read-CourseToolchainProfileInput -RawInput '  BASE  ' | Should -Be 'base'
+        Read-CourseToolchainProfileInput -RawInput 'evil' | Should -BeNullOrEmpty
+    }
+
+    It 'is guarded so dot-sourcing the entry point never starts the installer' {
+        Get-Content $script:PlannerPath -Raw | Should -Match ([regex]::Escape("if (`$MyInvocation.InvocationName -ne '.') {"))
+    }
+
+    It 'dispatches git_gh to the injected state provider without asking for confirmation' {
+        $script:confirmCalls = 0
+        $result = Invoke-CourseToolchainToolAction -ToolId git_gh -ConfirmationProvider { $script:confirmCalls++; $true } -GitGhStateProvider { [pscustomobject]@{ tool_id = 'git_gh'; status = 'missing' } }
+
+        $result.status | Should -Be 'missing'
+        $script:confirmCalls | Should -Be 0
+    }
+
+    It 'skips CLI, Docker, and GUI tools without any native install call when declined' {
+        foreach ($toolId in @('node_lts', 'cloudflared', 'docker_desktop', 'vscode')) {
+            $result = Invoke-CourseToolchainToolAction -ToolId $toolId -ConfirmationProvider { $false }
+            $result.tool_id | Should -Be $toolId
+            $result.status | Should -Be 'skipped'
+        }
+    }
+
+    It 'rejects an unknown tool ID before any dispatch' {
+        { Invoke-CourseToolchainToolAction -ToolId 'evil' -ConfirmationProvider { $true } } | Should -Throw '*Unknown tool ID*'
+    }
+
+    It 'reads free bytes through an injectable drive provider' {
+        Get-CourseToolchainFreeBytes -DriveProvider { param($letter) [pscustomobject]@{ Free = 123456789 } } | Should -Be 123456789
+        Get-CourseToolchainFreeBytes -DriveProvider { throw 'no drive' } | Should -BeNullOrEmpty
+    }
+
+    It 'runs an end-to-end base profile with only injected providers and reports readiness' {
+        $script:messages = [System.Collections.Generic.List[string]]::new()
+        $report = Start-CourseToolchainInstaller `
+            -ProfileInputProvider { 'base' } `
+            -GuiToolsInputProvider { '' } `
+            -ConfirmationProvider { $false } `
+            -GitGhStateProvider { [pscustomobject]@{ tool_id = 'git_gh'; status = 'ready' } } `
+            -FreeBytesProvider { 999999999999 } `
+            -Writer { param($message) $script:messages.Add($message) }
+
+        $report.profile | Should -Be 'base'
+        @($report.tools.tool_id) | Should -Be @('git_gh', 'node_lts')
+        ($script:messages -join "`n") | Should -Match 'Ready:'
+    }
+
+    It 'retries when the profile input is invalid before accepting a valid one' {
+        $script:profileAttempts = @('nope', 'BASE')
+        $script:profileIndex = 0
+        $script:messages = [System.Collections.Generic.List[string]]::new()
+
+        $report = Start-CourseToolchainInstaller `
+            -ProfileInputProvider { $value = $script:profileAttempts[$script:profileIndex]; $script:profileIndex++; $value } `
+            -GuiToolsInputProvider { '' } `
+            -ConfirmationProvider { $false } `
+            -GitGhStateProvider { [pscustomobject]@{ tool_id = 'git_gh'; status = 'ready' } } `
+            -FreeBytesProvider { 999999999999 } `
+            -Writer { param($message) $script:messages.Add($message) }
+
+        $report.profile | Should -Be 'base'
+        ($script:messages -join "`n") | Should -Match 'Unknown profile'
+    }
+
+    It 'routes a failed required tool through the failure resolver and reflects it as not ready' {
+        $script:resolverCalls = [System.Collections.Generic.List[object]]::new()
+        $report = Start-CourseToolchainInstaller `
+            -ProfileInputProvider { 'base' } `
+            -GuiToolsInputProvider { '' } `
+            -ConfirmationProvider { $false } `
+            -GitGhStateProvider { [pscustomobject]@{ tool_id = 'git_gh'; status = 'ready' } } `
+            -FreeBytesProvider { 999999999999 } `
+            -Writer {} `
+            -FailureResolver { param($profileName, $result) $script:resolverCalls.Add(@{ profile = $profileName; result = $result }) } `
+            -ToolActionInvoker {
+                param($toolId, $confirmationProvider, $gitGhStateProvider)
+                if ($toolId -ceq 'node_lts') { return [pscustomobject]@{ tool_id = 'node_lts'; status = 'failed'; error_kind = 'unknown' } }
+                Invoke-CourseToolchainToolAction -ToolId $toolId -ConfirmationProvider $confirmationProvider -GitGhStateProvider $gitGhStateProvider
+            }
+
+        $report.ready | Should -BeFalse
+        $script:resolverCalls.Count | Should -Be 1
+        $script:resolverCalls[0].profile | Should -Be 'base'
+        $script:resolverCalls[0].result.tool_id | Should -Be 'node_lts'
+    }
+}

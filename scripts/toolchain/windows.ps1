@@ -181,15 +181,17 @@ function Get-WindowsDockerPrerequisites {
         }
     )
 
-    $wslProbeResult = & $WslProbe
+    $wslProbeResult = try { & $WslProbe } catch { $null }
     $wsl2 = if ($wslProbeResult -is [bool]) {
         [bool]$wslProbeResult
     } else {
         [string]$wslProbeResult -match '(?m)(?:^|\r?\n)[^\r\n0-9]*2\s*$'
     }
+    $os = try { [string](& $OsProbe) } catch { '' }
+    $virtualization = try { [bool](& $VirtualizationProbe) } catch { $false }
     [pscustomobject][ordered]@{
-        os = [string](& $OsProbe)
-        virtualization = [bool](& $VirtualizationProbe)
+        os = $os
+        virtualization = $virtualization
         wsl2 = $wsl2
     }
 }

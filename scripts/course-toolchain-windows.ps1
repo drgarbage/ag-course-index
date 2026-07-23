@@ -252,3 +252,151 @@ function Resolve-CourseToolchainWindowsFailure {
         return [pscustomobject]@{ status = 'fallback'; support_code = $null }
     }
 }
+
+function Get-CourseToolchainGitGhState {
+    param(
+        [scriptblock]$CommandLookup = { param($command) $null -ne (Get-Command $command -ErrorAction SilentlyContinue) },
+        [scriptblock]$AuthProbe = {
+            & gh auth status --hostname github.com *> $null
+            $LASTEXITCODE -eq 0
+        }
+    )
+
+    if (-not [bool](& $CommandLookup 'git')) { return [pscustomobject]@{ tool_id = 'git_gh'; status = 'missing' } }
+    if (-not [bool](& $CommandLookup 'gh')) { return [pscustomobject]@{ tool_id = 'git_gh'; status = 'missing' } }
+    if (-not [bool](& $AuthProbe)) { return [pscustomobject]@{ tool_id = 'git_gh'; status = 'missing' } }
+    return [pscustomobject]@{ tool_id = 'git_gh'; status = 'ready' }
+}
+
+function Install-CourseToolchainWindowsCliTool {
+    param(
+        [Parameter(Mandatory)][ValidateSet('node_lts', 'cloudflared')][string]$ToolId,
+        [scriptblock]$ConfirmationProvider = {
+            param($message)
+            (Read-Host "$message [y/N]") -match '^(?i:y|yes)$'
+        }
+    )
+
+    Write-Host "Impact: $ToolId will be installed from its fixed WinGet package ID."
+    $confirmed = [bool](& $ConfirmationProvider "Install $ToolId")
+    Invoke-WindowsToolInstall -ToolId $ToolId -Confirmed $confirmed
+}
+
+function Invoke-CourseToolchainToolAction {
+    param(
+        [Parameter(Mandatory)][string]$ToolId,
+        [scriptblock]$ConfirmationProvider = {
+            param($message)
+            (Read-Host "$message [y/N]") -match '^(?i:y|yes)$'
+        },
+        [scriptblock]$GitGhStateProvider = { Get-CourseToolchainGitGhState }
+    )
+
+    if ($ToolId -ceq 'git_gh') { return & $GitGhStateProvider }
+    if ($ToolId -cin @('node_lts', 'cloudflared')) {
+        return Install-CourseToolchainWindowsCliTool -ToolId $ToolId -ConfirmationProvider $ConfirmationProvider
+    }
+    if ($ToolId -ceq 'docker_desktop') {
+        return Install-CourseToolchainWindowsDockerDesktop -ConfirmationProvider $ConfirmationProvider
+    }
+    if ($script:CourseToolchainGuiTools -ccontains $ToolId) {
+        return Install-CourseToolchainWindowsGuiTool -ToolId $ToolId -ConfirmationProvider $ConfirmationProvider
+    }
+    throw "Unknown tool ID: $ToolId"
+}
+
+function Read-CourseToolchainProfileInput {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$RawInput)
+
+    $normalized = $RawInput.Trim().ToLowerInvariant()
+    if (-not (@($script:CourseToolchainProfiles.Keys) -ccontains $normalized)) { return $null }
+    return $normalized
+}
+
+function Get-CourseToolchainFreeBytes {
+    param(
+        [string]$DriveLetter = ([string]$env:SystemDrive).TrimEnd(':'),
+        [scriptblock]$DriveProvider = { param($letter) Get-PSDrive -Name $letter -ErrorAction Stop }
+    )
+
+    try {
+        $drive = & $DriveProvider $DriveLetter
+        return [long]$drive.Free
+    } catch {
+        return $null
+    }
+}
+
+function Write-CourseToolchainWindowsReport {
+    param(
+        [Parameter(Mandatory)][object]$Report,
+        [scriptblock]$Writer = { param($message) Write-Host $message }
+    )
+
+    & $Writer "`nCourse toolchain readiness (profile: $($Report.profile))"
+    foreach ($tool in $Report.tools) {
+        $version = if ([string]::IsNullOrWhiteSpace([string]$tool.version)) { '-' } else { [string]$tool.version }
+        & $Writer ("  [{0}] {1} ({2}) - {3}" -f $tool.requirement, $tool.tool_id, $version, $tool.status)
+    }
+    & $Writer "Disk: $($Report.disk.status) (free=$($Report.disk.free_bytes), required=$($Report.disk.required_bytes))"
+    & $Writer "Ready: $($Report.ready)"
+    & $Writer "Next step: $($Report.next_step)"
+}
+
+function Start-CourseToolchainInstaller {
+    param(
+        [scriptblock]$ProfileInputProvider = { Read-Host 'Select a profile (base/line/data/full)' },
+        [scriptblock]$GuiToolsInputProvider = { Read-Host 'Optional GUI tools, comma separated (antigravity,vscode,browser) or blank' },
+        [scriptblock]$ConfirmationProvider = {
+            param($message)
+            (Read-Host "$message [y/N]") -match '^(?i:y|yes)$'
+        },
+        [scriptblock]$GitGhStateProvider = { Get-CourseToolchainGitGhState },
+        [scriptblock]$FreeBytesProvider = { Get-CourseToolchainFreeBytes },
+        [scriptblock]$Writer = { param($message) Write-Host $message },
+        [scriptblock]$FailureResolver = {
+            param($profileName, $result)
+            Resolve-CourseToolchainWindowsFailure -Profile $profileName -Result $result -FallbackWriter { param($message) Write-Host $message }
+        },
+        [scriptblock]$ToolActionInvoker = {
+            param($toolId, $confirmationProvider, $gitGhStateProvider)
+            Invoke-CourseToolchainToolAction -ToolId $toolId -ConfirmationProvider $confirmationProvider -GitGhStateProvider $gitGhStateProvider
+        }
+    )
+
+    $profileName = $null
+    while ($null -eq $profileName) {
+        $raw = [string](& $ProfileInputProvider)
+        $profileName = Read-CourseToolchainProfileInput -RawInput $raw
+        if ($null -eq $profileName) { & $Writer 'Unknown profile. Choose one of: base, line, data, full.' }
+    }
+
+    $guiRaw = [string](& $GuiToolsInputProvider)
+    $guiTools = @($guiRaw -split '[\s,]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim().ToLowerInvariant() })
+
+    $plan = Get-CourseToolchainPlan -Profile $profileName -GuiTools $guiTools
+    $results = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in $plan) {
+        $toolId = [string]$entry.tool_id
+        & $Writer "== $toolId =="
+        $result = & $ToolActionInvoker $toolId $ConfirmationProvider $GitGhStateProvider
+        $results.Add($result)
+
+        $status = Get-CourseToolchainWindowsFailureValue -Result $result -Name 'status'
+        if ($status -ceq 'failed') {
+            & $FailureResolver $profileName $result | Out-Null
+        }
+        if ($toolId -ceq 'git_gh' -and $status -cne 'ready') {
+            & $Writer 'Git/GitHub 尚未就緒，請先執行 docs/guides/git-and-gh.md 的安裝器，再重新執行本安裝器。'
+        }
+    }
+
+    $freeBytes = & $FreeBytesProvider
+    $report = Get-CourseToolchainWindowsReadinessReport -Profile $profileName -Results $results -FreeBytes $freeBytes
+    Write-CourseToolchainWindowsReport -Report $report -Writer $Writer
+    return $report
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    Start-CourseToolchainInstaller | Out-Null
+}

@@ -540,3 +540,96 @@ toolchain_test_unknown_action() {
   [[ "$output" != *RUN_ARBITRARY_COMMAND* ]]
   [[ "$output" != *evil.invalid* ]]
 }
+
+toolchain_test_profile_base() { printf 'base\n'; }
+toolchain_test_gui_blank() { printf '\n'; }
+toolchain_test_confirm_no() { printf 'no\n'; }
+toolchain_test_confirm_yes() { printf 'yes\n'; }
+toolchain_test_git_gh_ready() { printf '{"tool_id":"git_gh","status":"ready"}\n'; }
+toolchain_test_git_gh_missing() { printf '{"tool_id":"git_gh","status":"missing"}\n'; }
+toolchain_test_free_bytes_fixed() { printf '999999999999\n'; }
+
+toolchain_test_profile_retry() {
+  local state_file="$BATS_TEST_TMPDIR/profile-retry-state" count=0
+  [ -f "$state_file" ] && count="$(cat "$state_file")"
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$state_file"
+  if [ "$count" -eq 1 ]; then printf 'nope\n'; else printf 'BASE\n'; fi
+}
+
+toolchain_test_tool_action_node_failed() {
+  local tool_id="$1" confirmation_provider="$2" git_gh_provider="$3"
+  if [ "$tool_id" = node_lts ]; then
+    printf '{"tool_id":"node_lts","status":"failed","error_kind":"unknown"}\n'
+  else
+    course_toolchain_tool_action_via_provider "$tool_id" "$confirmation_provider" "$git_gh_provider"
+  fi
+}
+
+toolchain_test_failure_resolver_capture() {
+  printf 'FAILURE_RESOLVER_CALLED profile=%s result=%s\n' "$1" "$2" >&2
+}
+
+@test "profile input is normalized and validated" {
+  run read_course_toolchain_profile_input '  BASE  '
+  [ "$status" -eq 0 ]
+  [ "$output" = base ]
+
+  run read_course_toolchain_profile_input 'evil'
+  [ "$status" -ne 0 ]
+}
+
+@test "the entry point is guarded so sourcing it never starts the installer" {
+  run grep -F 'if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then' "$PLANNER"
+  [ "$status" -eq 0 ]
+}
+
+@test "git_gh dispatch uses the injected state provider without a confirmation prompt" {
+  run course_toolchain_tool_action_via_provider git_gh toolchain_test_confirm_yes toolchain_test_git_gh_missing
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"missing"'* ]]
+}
+
+@test "CLI, Docker, and GUI tool dispatch skip cleanly without any native install call when declined" {
+  for tool_id in node_lts cloudflared docker_desktop vscode; do
+    run course_toolchain_tool_action_via_provider "$tool_id" toolchain_test_confirm_no toolchain_test_git_gh_ready
+    [ "$status" -eq 0 ] || [ "$status" -eq 2 ]
+    [[ "$output" == *"\"tool_id\":\"$tool_id\""* ]]
+    [[ "$output" == *'"status":"skipped"'* ]]
+  done
+}
+
+@test "dispatch rejects an unknown tool id" {
+  run course_toolchain_tool_action_via_provider evil toolchain_test_confirm_no toolchain_test_git_gh_ready
+  [ "$status" -eq 64 ]
+}
+
+@test "free bytes provider honors the test override" {
+  COURSE_TOOLCHAIN_FREE_BYTES_OVERRIDE=123456789
+  export COURSE_TOOLCHAIN_FREE_BYTES_OVERRIDE
+  run course_toolchain_free_bytes
+  [ "$status" -eq 0 ]
+  [ "$output" = 123456789 ]
+}
+
+@test "an end-to-end base profile run uses only injected providers and reports readiness" {
+  run start_course_toolchain_installer toolchain_test_profile_base toolchain_test_gui_blank toolchain_test_confirm_no toolchain_test_git_gh_ready toolchain_test_free_bytes_fixed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Course toolchain readiness (profile: base)'* ]]
+  [[ "$output" == *'Ready:'* ]]
+  [[ "$output" == *'"profile":"base"'* ]]
+}
+
+@test "an invalid profile is retried before a valid one is accepted" {
+  run start_course_toolchain_installer toolchain_test_profile_retry toolchain_test_gui_blank toolchain_test_confirm_no toolchain_test_git_gh_ready toolchain_test_free_bytes_fixed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Unknown profile'* ]]
+  [[ "$output" == *'"profile":"base"'* ]]
+}
+
+@test "a failed required tool is routed through the failure resolver and marks the profile not ready" {
+  run start_course_toolchain_installer toolchain_test_profile_base toolchain_test_gui_blank toolchain_test_confirm_no toolchain_test_git_gh_ready toolchain_test_free_bytes_fixed course_toolchain_macos_default_writer toolchain_test_failure_resolver_capture toolchain_test_tool_action_node_failed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'FAILURE_RESOLVER_CALLED profile=base'* ]]
+  [[ "$output" == *'"ready":false'* ]]
+}
