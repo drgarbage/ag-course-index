@@ -1,0 +1,13 @@
+{
+  "arm64": {
+    "filename": "Docker-AppleSilicon.dmg",
+    "url": "https://desktop.docker.com/mac/main/arm64/226246/Docker.dmg",
+    "sha256": "5f08b5e3e7e33cca7c364a585b15bcea4947159606453095a8a09bcc0fd44005"
+  },
+  "x86_64": {
+    "filename": "Docker-Intel.dmg",
+    "url": "https://desktop.docker.com/mac/main/amd64/226246/Docker.dmg",
+    "sha256": "a88a63b4c74d5e85c9d41ec9b4065472b8812c0e3dfb63e31fdda3d3b1268a8b"
+  },
+  "application_path": "/Applications/Docker.app"
+}

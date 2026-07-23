@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "node_lts_major": 24,
+  "profiles": {
+    "base": ["git_gh", "node_lts"],
+    "line": ["git_gh", "node_lts", "cloudflared"],
+    "data": ["git_gh", "node_lts", "docker_desktop"],
+    "full": ["git_gh", "node_lts", "cloudflared", "docker_desktop"]
+  },
+  "gui_tools": ["antigravity", "vscode", "browser"]
+}

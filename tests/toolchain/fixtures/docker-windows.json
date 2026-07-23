@@ -1,0 +1,6 @@
+{
+  "os": "Windows 11",
+  "virtualization": true,
+  "wsl2": true,
+  "docker_desktop_path": "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"
+}

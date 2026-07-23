@@ -4,12 +4,357 @@ param()
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Git 與 GitHub CLI 課程環境安裝程式"
 
+$InstallSupportBaseUrl = "https://gemini.printii.com/api/install-support"
+$InstallSupportPatternPath = Join-Path $PSScriptRoot 'install-support-patterns.json'
+
+function Invoke-InstallSupportRequest {
+    param([hashtable]$Request)
+
+    $parameters = @{
+        Uri = $Request.Uri
+        Method = $Request.Method
+        Headers = $Request.Headers
+        ContentType = "application/json"
+        TimeoutSec = $Request.TimeoutSec
+    }
+    if ($null -ne $Request.Body) {
+        $parameters.Body = $Request.Body | ConvertTo-Json -Depth 8 -Compress
+    }
+    Invoke-RestMethod @parameters
+}
+
+function Get-InstallDiagnostics {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [string]$LastError = "",
+        [scriptblock]$CommandLookup = { param($name) $null -ne (Get-Command $name -ErrorAction SilentlyContinue) },
+        [scriptblock]$RawNetworkProbe = {
+            if ($null -eq (Get-Command 'curl.exe' -ErrorAction SilentlyContinue)) { return $false }
+            & curl.exe --head --silent --show-error --max-time 5 https://raw.githubusercontent.com *> $null
+            return ($LASTEXITCODE -eq 0)
+        }
+    )
+
+    $safeError = $LastError -replace '(?i)C:\\Users\\[^\\\s]+', 'C:\Users\<USER>'
+    if ($safeError.Length -gt 4000) { $safeError = $safeError.Substring(0, 4000) }
+
+    [pscustomobject]@{
+        platform = "windows"
+        step = $Step
+        git_found = [bool](& $CommandLookup "git")
+        gh_found = [bool](& $CommandLookup "gh")
+        winget_available = [bool](& $CommandLookup "winget")
+        github_auth_state = if ($Step -eq 'github_auth' -and (& $CommandLookup "gh")) {
+            & gh auth status --hostname github.com *> $null
+            if ($LASTEXITCODE -eq 0) { 'authenticated' } else { 'not_logged_in' }
+        } else { 'unknown' }
+        credential_helper_state = if ($Step -eq 'credential_helper' -and (& $CommandLookup "git")) {
+            $configuredHelper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
+            if ($configuredHelper) { 'configured' } else { 'missing' }
+        } else { 'unknown' }
+        raw_github_network = if ($Step -eq 'network') {
+            if (& $RawNetworkProbe) { 'ok' } else { 'blocked' }
+        } else { 'unknown' }
+        stderr = $safeError
+    }
+}
+
+function New-InstallSupportSession {
+    param(
+        [Parameter(Mandatory)][string]$InstallerVersion,
+        [scriptblock]$Transport = ${function:Invoke-InstallSupportRequest}
+    )
+
+    & $Transport @{
+        Uri = "$InstallSupportBaseUrl/sessions"
+        Method = "POST"
+        Headers = @{}
+        TimeoutSec = 20
+        Body = @{ platform = "windows"; installer_version = $InstallerVersion }
+    }
+}
+
+function Invoke-InstallDiagnosis {
+    param(
+        [Parameter(Mandatory)]$Session,
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)][ValidateRange(1, 15)][int]$Attempt,
+        [Parameter(Mandatory)]$Diagnostics,
+        $PreviousAction = $null,
+        [scriptblock]$Transport = ${function:Invoke-InstallSupportRequest}
+    )
+
+    & $Transport @{
+        Uri = "$InstallSupportBaseUrl/diagnose"
+        Method = "POST"
+        Headers = @{ Authorization = "Bearer $($Session.session_token)" }
+        TimeoutSec = 20
+        Body = @{
+            session_id = $Session.session_id
+            step = $Step
+            attempt = $Attempt
+            diagnostics = $Diagnostics
+            previous_action = $PreviousAction
+        }
+    }
+}
+
+function Invoke-FixedInstallCommand {
+    param([string]$Command, [string[]]$Arguments)
+
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $process = Start-Process -FilePath $Command -ArgumentList $Arguments -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+        [pscustomobject]@{
+            exit_code = $process.ExitCode
+            stdout = Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue
+            stderr = Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue
+        }
+    } finally {
+        Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-AllowlistedInstallAction {
+    param(
+        [Parameter(Mandatory)][string]$ActionId,
+        [switch]$Confirmed,
+        [scriptblock]$CommandRunner = ${function:Invoke-FixedInstallCommand}
+    )
+
+    $definitions = @{
+        CHECK_GIT_VERSION = @{ command = 'git'; arguments = @('--version'); confirmation = $false }
+        CHECK_GH_VERSION = @{ command = 'gh'; arguments = @('--version'); confirmation = $false }
+        CHECK_WINGET_VERSION = @{ command = 'winget'; arguments = @('--version'); confirmation = $false }
+        CHECK_GITHUB_NETWORK = @{ command = 'curl.exe'; arguments = @('--head', '--max-time', '10', 'https://github.com'); confirmation = $false }
+        CHECK_RAW_GITHUB_NETWORK = @{ command = 'curl.exe'; arguments = @('--head', '--max-time', '10', 'https://raw.githubusercontent.com'); confirmation = $false }
+        CHECK_GH_AUTH_STATUS = @{ command = 'gh'; arguments = @('auth', 'status', '--hostname', 'github.com'); confirmation = $false }
+        CHECK_GIT_CREDENTIAL_HELPER = @{ command = 'git'; arguments = @('config', '--global', '--get-regexp', '^credential\..*\.helper$|^credential\.helper$'); confirmation = $false }
+        REFRESH_WINDOWS_PATH = @{ command = '__refresh_path__'; arguments = @(); confirmation = $true }
+        INSTALL_GIT_WINDOWS = @{ command = 'winget'; arguments = @('install', '--id', 'Git.Git', '--exact', '--source', 'winget', '--accept-source-agreements', '--accept-package-agreements'); confirmation = $true }
+        INSTALL_GH_WINDOWS = @{ command = 'winget'; arguments = @('install', '--id', 'GitHub.cli', '--exact', '--source', 'winget', '--accept-source-agreements', '--accept-package-agreements'); confirmation = $true }
+        GH_AUTH_LOGIN_WEB = @{ command = 'gh'; arguments = @('auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'); confirmation = $true }
+        GH_AUTH_SETUP_GIT = @{ command = 'gh'; arguments = @('auth', 'setup-git', '--hostname', 'github.com'); confirmation = $true }
+        GH_AUTH_SWITCH = @{ command = 'gh'; arguments = @('auth', 'switch', '--hostname', 'github.com'); confirmation = $true }
+        CLEAR_STALE_GITHUB_CREDENTIAL_WINDOWS = @{ command = 'cmdkey.exe'; arguments = @('/delete:LegacyGeneric:target=git:https://github.com'); confirmation = $true }
+        OPEN_WINDOWS_CREDENTIAL_MANAGER = @{ command = 'control.exe'; arguments = @('/name', 'Microsoft.CredentialManager'); confirmation = $false }
+        RESTART_TERMINAL_REQUIRED = @{ command = '__no_op__'; arguments = @(); confirmation = $true }
+        CONTACT_INSTRUCTOR = @{ command = '__no_op__'; arguments = @(); confirmation = $false }
+    }
+
+    $definition = $definitions[$ActionId]
+    if ($null -eq $definition) { throw "Unknown install support action: $ActionId" }
+    if ($definition.confirmation -and -not $Confirmed) {
+        return [pscustomobject]@{
+            action_id = $ActionId
+            exit_code = -1
+            stdout = ''
+            stderr = 'Explicit confirmation is required.'
+        }
+    }
+
+    if ($definition.command -eq '__refresh_path__') {
+        Refresh-Path
+        $commandResult = @{ exit_code = 0; stdout = 'Windows PATH refreshed.'; stderr = '' }
+    } elseif ($definition.command -eq '__no_op__') {
+        $commandResult = @{ exit_code = 0; stdout = ''; stderr = '' }
+    } else {
+        $commandResult = & $CommandRunner $definition.command ([string[]]$definition.arguments)
+    }
+
+    [pscustomobject]@{
+        action_id = $ActionId
+        exit_code = [int]$commandResult.exit_code
+        stdout = [string]$commandResult.stdout
+        stderr = [string]$commandResult.stderr
+    }
+}
+
+function Test-WindowsActionRequiresConfirmation {
+    param([Parameter(Mandatory)][string]$ActionId)
+    $stateChangingActions = @(
+        'REFRESH_WINDOWS_PATH', 'INSTALL_GIT_WINDOWS', 'INSTALL_GH_WINDOWS',
+        'GH_AUTH_LOGIN_WEB', 'GH_AUTH_SETUP_GIT', 'GH_AUTH_SWITCH',
+        'CLEAR_STALE_GITHUB_CREDENTIAL_WINDOWS', 'RESTART_TERMINAL_REQUIRED'
+    )
+    if ($ActionId -in $stateChangingActions) { return $true }
+    $readOnlyActions = @(
+        'CHECK_GIT_VERSION', 'CHECK_GH_VERSION', 'CHECK_WINGET_VERSION',
+        'CHECK_GITHUB_NETWORK', 'CHECK_RAW_GITHUB_NETWORK', 'CHECK_GH_AUTH_STATUS',
+        'CHECK_GIT_CREDENTIAL_HELPER', 'OPEN_WINDOWS_CREDENTIAL_MANAGER', 'CONTACT_INSTRUCTOR'
+    )
+    if ($ActionId -in $readOnlyActions) { return $false }
+    throw "Unknown install support action: $ActionId"
+}
+
+function Invoke-LocalInstallPattern {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)]$Diagnostics,
+        [Parameter(Mandatory)][string]$RulesPath,
+        [scriptblock]$ConfirmationProvider = { Read-Host '是否執行上述本機修復？(y/N)' },
+        [scriptblock]$ActionRunner = { param($actionId, $confirmed) Invoke-AllowlistedInstallAction -ActionId $actionId -Confirmed:$confirmed }
+    )
+
+    if (-not (Test-Path $RulesPath -PathType Leaf)) { return $null }
+    try { $document = Get-Content $RulesPath -Raw | ConvertFrom-Json } catch { return $null }
+    if ($document.schema_version -ne 1 -or $null -eq $document.patterns) { return $null }
+    $allowedActions = @(
+        'CHECK_GIT_VERSION', 'CHECK_GH_VERSION', 'CHECK_WINGET_VERSION', 'CHECK_GITHUB_NETWORK',
+        'CHECK_RAW_GITHUB_NETWORK', 'CHECK_GH_AUTH_STATUS', 'CHECK_GIT_CREDENTIAL_HELPER',
+        'REFRESH_WINDOWS_PATH', 'INSTALL_GIT_WINDOWS', 'INSTALL_GH_WINDOWS', 'GH_AUTH_LOGIN_WEB',
+        'GH_AUTH_SETUP_GIT', 'GH_AUTH_SWITCH', 'CLEAR_STALE_GITHUB_CREDENTIAL_WINDOWS',
+        'OPEN_WINDOWS_CREDENTIAL_MANAGER', 'RESTART_TERMINAL_REQUIRED', 'CONTACT_INSTRUCTOR'
+    )
+    $allowedMatcherValues = @($true, $false, 'missing', 'expired', 'blocked', 'not_logged_in', 0, 1)
+
+    foreach ($pattern in $document.patterns) {
+        if ($pattern.platform -ne 'windows' -or $pattern.step -ne $Step) { continue }
+        if ($pattern.action_id -notin $allowedActions -or $pattern.risk -notin @('read_only', 'low', 'medium')) { continue }
+        $expectedConfirmation = $pattern.risk -in @('low', 'medium')
+        if ([bool]$pattern.requires_confirmation -ne $expectedConfirmation) { continue }
+        $matched = $true
+        foreach ($matcher in $pattern.all.PSObject.Properties) {
+            if ($matcher.Value -notin $allowedMatcherValues -or $Diagnostics[$matcher.Name] -ne $matcher.Value) {
+                $matched = $false
+                break
+            }
+        }
+        if (-not $matched) { continue }
+
+        $confirmed = $true
+        if ($pattern.requires_confirmation) {
+            $confirmed = ((& $ConfirmationProvider) -match '^(?i:y|yes)$')
+        }
+        $actionResult = & $ActionRunner ([string]$pattern.action_id) $confirmed
+        return [pscustomobject]@{
+            matched = $true
+            local_pattern_key = [string]$pattern.pattern_key
+            action_id = [string]$actionResult.action_id
+            exit_code = [int]$actionResult.exit_code
+            succeeded = ([int]$actionResult.exit_code -eq 0)
+        }
+    }
+    return $null
+}
+
+function Invoke-OptionalInstallSupport {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)]$Diagnostics,
+        [string]$InstallerVersion = '1.0.0',
+        [scriptblock]$ConsentProvider = { Read-Host '是否使用 AI 安裝助理？(y/N)' },
+        [scriptblock]$ConfirmationProvider = { Read-Host '是否執行上述動作？(y/N)' },
+        [scriptblock]$SessionFactory = { param($version) New-InstallSupportSession -InstallerVersion $version },
+        [scriptblock]$DiagnosisProvider = {
+            param($session, $supportStep, $attempt, $safeDiagnostics, $previousAction)
+            Invoke-InstallDiagnosis -Session $session -Step $supportStep -Attempt $attempt `
+                -Diagnostics $safeDiagnostics -PreviousAction $previousAction
+        },
+        [scriptblock]$ActionRunner = {
+            param($actionId, $confirmed)
+            Invoke-AllowlistedInstallAction -ActionId $actionId -Confirmed:$confirmed
+        },
+        [scriptblock]$LocalPatternProvider = {
+            param($supportStep, $safeDiagnostics, $confirmationProvider, $actionRunner)
+            if (-not [string]::IsNullOrWhiteSpace($script:InstallSupportPatternPath)) {
+                Invoke-LocalInstallPattern -Step $supportStep -Diagnostics $safeDiagnostics `
+                    -RulesPath $script:InstallSupportPatternPath -ConfirmationProvider $confirmationProvider -ActionRunner $actionRunner
+            }
+        },
+        [scriptblock]$OutputWriter = { param($message) Write-Host $message }
+    )
+
+    $localResult = & $LocalPatternProvider $Step $Diagnostics $ConfirmationProvider $ActionRunner
+    if ($localResult -and $localResult.matched -and $localResult.succeeded) {
+        return [pscustomobject]@{
+            status = 'local_resolved'
+            local_pattern_key = [string]$localResult.local_pattern_key
+            support_code = $null
+        }
+    }
+    $initialPreviousAction = $null
+    if ($localResult -and $localResult.matched) {
+        $initialPreviousAction = @{
+            local_pattern_key = [string]$localResult.local_pattern_key
+            action_id = [string]$localResult.action_id
+            exit_code = [int]$localResult.exit_code
+            succeeded = [bool]$localResult.succeeded
+        }
+    }
+
+    if ((& $ConsentProvider) -notmatch '^(?i:y|yes)$') {
+        return [pscustomobject]@{ status = 'declined'; support_code = $null }
+    }
+
+    try {
+        $session = & $SessionFactory $InstallerVersion
+        $previousAction = $initialPreviousAction
+        $supportCode = $null
+        for ($attempt = 1; $attempt -le 15; $attempt++) {
+            $diagnosis = & $DiagnosisProvider $session $Step $attempt $Diagnostics $previousAction
+            if ($diagnosis.support_code) { $supportCode = $diagnosis.support_code }
+            if ($diagnosis.resolved -isnot [bool]) {
+                return [pscustomobject]@{ status = 'fallback'; support_code = $supportCode }
+            }
+            if ($diagnosis.summary_zh_tw) { & $OutputWriter ([string]$diagnosis.summary_zh_tw) }
+            if ($diagnosis.explanation_zh_tw) { & $OutputWriter ([string]$diagnosis.explanation_zh_tw) }
+            if ($diagnosis.resolved) {
+                return [pscustomobject]@{ status = 'resolved'; support_code = $supportCode }
+            }
+
+            $action = $diagnosis.action
+            if (-not $action -or -not $action.id) {
+                return [pscustomobject]@{ status = 'fallback'; support_code = $supportCode }
+            }
+            if ($action.title_zh_tw) { & $OutputWriter ([string]$action.title_zh_tw) }
+            if ($action.impact_zh_tw) { & $OutputWriter ([string]$action.impact_zh_tw) }
+            if ($action.id -eq 'CONTACT_INSTRUCTOR') {
+                return [pscustomobject]@{ status = 'contact'; support_code = $supportCode }
+            }
+
+            $requiresConfirmation = Test-WindowsActionRequiresConfirmation ([string]$action.id)
+            $confirmed = -not $requiresConfirmation
+            if ($requiresConfirmation) {
+                $confirmed = ((& $ConfirmationProvider) -match '^(?i:y|yes)$')
+                if (-not $confirmed) {
+                    return [pscustomobject]@{ status = 'action_declined'; support_code = $supportCode }
+                }
+            }
+            $actionResult = & $ActionRunner ([string]$action.id) $confirmed
+            $previousAction = @{
+                action_id = [string]$actionResult.action_id
+                exit_code = [int]$actionResult.exit_code
+                succeeded = ([int]$actionResult.exit_code -eq 0)
+            }
+        }
+        [pscustomobject]@{ status = 'limit'; support_code = $supportCode }
+    } catch {
+        [pscustomobject]@{ status = 'fallback'; support_code = $supportCode }
+    }
+}
+
 function Write-Step([string]$Message) { Write-Host "`n▶ $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "  ✓ $Message" -ForegroundColor Green }
 function Write-WarnZh([string]$Message) { Write-Host "  ! $Message" -ForegroundColor Yellow }
-function Stop-Zh([string]$Message, [string]$Suggestion) {
+function Stop-Zh(
+    [string]$Message,
+    [string]$Suggestion,
+    [string]$Step = 'network'
+) {
     Write-Host "`n安裝未完成：$Message" -ForegroundColor Red
     Write-Host "建議處理方式：$Suggestion" -ForegroundColor Yellow
+    $diagnostics = Get-InstallDiagnostics -Step $Step -LastError $Message
+    $recovery = Invoke-OptionalInstallSupport -Step $Step -Diagnostics $diagnostics
+    if ($recovery.status -in @('resolved', 'local_resolved')) {
+        Write-Ok 'AI 安裝助理已完成排錯。'
+        exit 0
+    }
+    if ($recovery.support_code) {
+        Write-Host "支援碼：$($recovery.support_code)" -ForegroundColor Yellow
+    }
     Read-Host "按 Enter 結束"
     exit 1
 }
@@ -27,7 +372,7 @@ Write-Host "程式只會安裝官方套件、設定 Git，並開啟 GitHub 官�
 
 Write-Step "檢查 WinGet"
 if (-not (Has-Command "winget")) {
-    Stop-Zh "找不到 WinGet。" "開啟 Microsoft Store，安裝或更新『應用程式安裝程式（App Installer）』，重新開機後再執行本程式。"
+    Stop-Zh "找不到 WinGet。" "開啟 Microsoft Store，安裝或更新『應用程式安裝程式（App Installer）』，重新開機後再執行本程式。" 'git_install'
 }
 Write-Ok "WinGet 可使用"
 
@@ -40,11 +385,11 @@ if (Has-Command "git") {
         & winget install --id Git.Git --exact --source winget --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -ne 0) { throw "WinGet 結束代碼 $LASTEXITCODE" }
     } catch {
-        Stop-Zh "Git 安裝失敗：$($_.Exception.Message)" "確認網路連線、Windows Update 與 Microsoft Store 可用，再以系統管理員身分重新執行。"
+        Stop-Zh "Git 安裝失敗：$($_.Exception.Message)" "確認網路連線、Windows Update 與 Microsoft Store 可用，再以系統管理員身分重新執行。" 'git_install'
     }
     Refresh-Path
     if (-not (Has-Command "git")) {
-        Stop-Zh "Git 已執行安裝，但目前終端機仍找不到 git。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。"
+        Stop-Zh "Git 已執行安裝，但目前終端機仍找不到 git。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。" 'path'
     }
     Write-Ok "安裝完成：$(git --version)"
 }
@@ -57,11 +402,11 @@ if (Has-Command "gh") {
         & winget install --id GitHub.cli --exact --source winget --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -ne 0) { throw "WinGet 結束代碼 $LASTEXITCODE" }
     } catch {
-        Stop-Zh "GitHub CLI 安裝失敗：$($_.Exception.Message)" "確認網路連線後重新執行；也可從 https://cli.github.com/ 手動安裝。"
+        Stop-Zh "GitHub CLI 安裝失敗：$($_.Exception.Message)" "確認網路連線後重新執行；也可從 https://cli.github.com/ 手動安裝。" 'gh_install'
     }
     Refresh-Path
     if (-not (Has-Command "gh")) {
-        Stop-Zh "GitHub CLI 已執行安裝，但目前終端機仍找不到 gh。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。"
+        Stop-Zh "GitHub CLI 已執行安裝，但目前終端機仍找不到 gh。" "關閉所有 PowerShell／Windows Terminal 視窗，重新開啟後再執行本程式。" 'path'
     }
     Write-Ok "安裝完成：$(gh --version | Select-Object -First 1)"
 }
@@ -122,7 +467,7 @@ if ($LASTEXITCODE -ne 0) {
     }
 
     if (-not $loggedIn) {
-        Stop-Zh "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱），再重新執行本程式。若有多個帳號，先執行 gh auth switch。"
+        Stop-Zh "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱），再重新執行本程式。若有多個帳號，先執行 gh auth switch。" 'github_auth'
     }
 } else {
     Write-Ok "GitHub CLI 已登入"
@@ -133,7 +478,7 @@ Write-Step "讓 Git 使用 GitHub CLI 保存 HTTPS 憑證"
 & gh config set git_protocol https --host github.com
 & gh auth setup-git --hostname github.com
 if ($LASTEXITCODE -ne 0) {
-    Stop-Zh "無法設定 Git credential helper。" "執行 gh auth status 確認登入，再執行 gh auth setup-git。若仍失敗，檢查 Windows 認證管理員中的舊 GitHub 項目。"
+    Stop-Zh "無法設定 Git credential helper。" "執行 gh auth status 確認登入，再執行 gh auth setup-git。若仍失敗，檢查 Windows 認證管理員中的舊 GitHub 項目。" 'credential_helper'
 }
 Write-Ok "Git 不應再於每次 pull／push 時重複要求登入"
 
@@ -146,7 +491,7 @@ if ($LASTEXITCODE -ne 0) { Write-WarnZh "GitHub 授權驗證失敗"; $failed = $
 $helper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
 if (-not $helper) { Write-WarnZh "找不到 Git 憑證助手設定"; $failed = $true }
 if ($failed) {
-    Stop-Zh "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。"
+    Stop-Zh "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。" 'credential_helper'
 }
 
 Write-Host "`n所有必要設定皆已完成。" -ForegroundColor Green
