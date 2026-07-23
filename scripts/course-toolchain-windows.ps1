@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -35,6 +35,33 @@ function Test-CourseToolchainExactList {
     }
 }
 
+function ConvertTo-CourseToolchainHashtable {
+    # Windows PowerShell 5.1 lacks ConvertFrom-Json -AsHashtable, so deep-convert the
+    # PSCustomObject it returns into nested hashtables/arrays. Behaviour matches the
+    # -AsHashtable shape the catalog validation below expects on both 5.1 and 7+.
+    param([Parameter(Mandatory)][AllowNull()][object]$InputObject)
+
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $result = @{}
+        foreach ($property in $InputObject.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-CourseToolchainHashtable $property.Value
+        }
+        return $result
+    }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        $result = @{}
+        foreach ($key in @($InputObject.Keys)) {
+            $result[$key] = ConvertTo-CourseToolchainHashtable $InputObject[$key]
+        }
+        return $result
+    }
+    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+        return @(foreach ($item in $InputObject) { ConvertTo-CourseToolchainHashtable $item })
+    }
+    return $InputObject
+}
+
 function Get-CourseToolchainCatalog {
     param([string]$CatalogPath = $script:CourseToolchainCatalogPath)
 
@@ -42,7 +69,8 @@ function Get-CourseToolchainCatalog {
         throw "Course toolchain catalog was not found: $CatalogPath"
     }
     try {
-        $catalog = Get-Content -LiteralPath $CatalogPath -Raw | ConvertFrom-Json -AsHashtable -Depth 8
+        $parsedCatalog = Get-Content -LiteralPath $CatalogPath -Raw | ConvertFrom-Json
+        $catalog = ConvertTo-CourseToolchainHashtable $parsedCatalog
     } catch {
         throw "Invalid course toolchain catalog."
     }

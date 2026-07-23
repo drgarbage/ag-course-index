@@ -18,6 +18,13 @@
 7. 初次設定代理程式權限時，建議選擇 **Review-driven development**。
 8. 只安裝課程需要的擴充套件與外掛。
 
+## 繁體中文化支援
+
+本課程的一鍵安裝器提供了開發環境與 Antigravity 2.0 桌面版的繁體中文化：
+- **語言包擴充功能**：自動中文化 VS Code 與 Antigravity IDE 的開發介面。
+- **ASAR 注入修補檔**：基於安全釘選的 Commit 程式碼，將 Antigravity 桌面程式的主選單、設定與狀態匣切換成繁體中文。
+- 詳細使用指引請參考 [macOS 課程環境一鍵安裝器指引](course-toolchain-macos.md)。
+
 ## 安裝確認
 
 1. 開啟一個測試資料夾。
