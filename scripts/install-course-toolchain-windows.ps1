@@ -1,4 +1,5 @@
-﻿Set-StrictMode -Version Latest
+﻿# Windows Course Toolchain Installer
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Parse parameters manually from $args to allow Invoke-Expression execution without syntax errors
