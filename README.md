@@ -1,9 +1,11 @@
 # Gemini 課程範例
 本專案存放 Gemini 實戰課程相關範例連結
 
-## 下載連結
-* Antigravity [Windows](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/windows-x64/Antigravity-x64.exe) | [macOS](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/darwin-arm/Antigravity.dmg)
-* Antigravity IDE [Windows](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/windows-x64/Antigravity%20IDE.exe) | [macOS](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/darwin-arm/Antigravity%20IDE.dmg)
+### 前往 [課程投影畫面](https://gemini.printii.com/live-board)
+> ⚠️ **輔助工具安裝** 若出現警示，請依以下方式開啟：
+> * **Windows**：點選 **其他資訊** 並選擇 **仍要執行**。
+> * **macOS**：點選右鍵選擇 **打開**，或至 **系統設定 > 隱私權與安全性** 點選 **仍要開啟**。
+
 
 ## 課程簡報
 * [01 - AI Agent與Gemini](https://drive.google.com/file/d/1tj3D4CABs7zXA292MLywNsZUf2JphaPF/view?usp=drive_link)
@@ -37,6 +39,12 @@
 * ag-course-camping-line-chatbot : 露營裝備租賃助理 Line 聊天機器人版
 * ag-course-web-report : 報表相關的通用基底
 * [ag-course-copilot](https://github.com/drgarbage/ag-course-copilot) : 即時助理
+
+
+## 下載連結
+* Antigravity [Windows](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/windows-x64/Antigravity-x64.exe) | [macOS](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/darwin-arm/Antigravity.dmg)
+* Antigravity IDE [Windows](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/windows-x64/Antigravity%20IDE.exe) | [macOS](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/darwin-arm/Antigravity%20IDE.dmg)
+
 
 ## 其他資源
 * [postgres-northwind](https://github.com/drgarbage/postgres-northwind) : 北風資料庫
