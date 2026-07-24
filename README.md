@@ -1,7 +1,7 @@
 # Gemini 課程範例
 本專案存放 Gemini 實戰課程相關範例連結
 
-### 前往 [課程投影畫面](https://gemini.printii.com/live-board)
+### 前往 [課程投影畫面](https://gemini.printii.com/live-board#/live-board)
 > ⚠️ **輔助工具安裝** 若出現警示，請依以下方式開啟：
 > * **Windows**：點選 **其他資訊** 並選擇 **仍要執行**。
 > * **macOS**：點選右鍵選擇 **打開**，或至 **系統設定 > 隱私權與安全性** 點選 **仍要開啟**。
