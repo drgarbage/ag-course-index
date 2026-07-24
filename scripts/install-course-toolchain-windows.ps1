@@ -327,7 +327,9 @@ function Install-Custom {
     Write-Host " 3) Cloudflare Tunnel (cloudflared)"
     Write-Host " 4) Docker Desktop (docker_desktop)"
     Write-Host " 5) GUI 工具 (Antigravity IDE, VS Code, Browser)"
-    Write-Host " 6) 中文化 (VS Code/IDE 語言包, Antigravity 2.0 漢化)"
+    Write-Host " 6) Antigravity 2.0 中文化"
+    Write-Host " 7) Antigravity IDE 中文化 (設定教學)"
+    Write-Host " 8) VS Code 中文化 (設定教學)"
     Write-Host ""
     
     $selection = Read-Host "請輸入編號"
@@ -336,7 +338,7 @@ function Install-Custom {
         return
     }
     
-    $parts = @($selection.Split(',; ') | Where-Object { $_ -match '^[1-6]$' })
+    $parts = @($selection.Split(',; ') | Where-Object { $_ -match '^[1-8]$' })
     if ($parts.Count -eq 0) {
         Write-Host "無效的選擇，返回選單。"
         return
@@ -375,17 +377,32 @@ function Install-Custom {
                 }
             }
             "6" {
-                Write-Host "`n▶ 檢查並安裝中文化模組..." -ForegroundColor Cyan
-                $choice = Read-Host "請選擇：1) 全部安裝 2) 僅安裝 VS Code/IDE 語言包 3) 僅安裝 Antigravity 2.0 漢化 [預設: 1]"
-                if ($choice -eq '2') {
-                    Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true | Out-Null
-                    Invoke-WindowsLocalizationInstall -Target 'antigravity_ide' -Confirmed:$true | Out-Null
-                } elseif ($choice -eq '3') {
-                    Invoke-WindowsLocalizationInstall -Target 'antigravity_app' -Confirmed:$true | Out-Null
+                Write-Host "`n▶ 檢查並執行 Antigravity 2.0 中文化..." -ForegroundColor Cyan
+                $res = Invoke-WindowsLocalizationInstall -Target 'antigravity_app' -Confirmed:$true
+                if ($res.status -eq 'ready') {
+                    Write-Host "✓ Antigravity 2.0 中文化完成。" -ForegroundColor Green
+                } elseif ($res.status -eq 'failed') {
+                    Write-Host "✗ Antigravity 2.0 中文化失敗：$($res.reason)" -ForegroundColor Red
                 } else {
-                    Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true | Out-Null
-                    Invoke-WindowsLocalizationInstall -Target 'antigravity_ide' -Confirmed:$true | Out-Null
-                    Invoke-WindowsLocalizationInstall -Target 'antigravity_app' -Confirmed:$true | Out-Null
+                    Write-Host "  Antigravity 2.0 中文化已取消。" -ForegroundColor Yellow
+                }
+            }
+            "7" {
+                Write-Host "`n▶ 檢查並執行 Antigravity IDE 中文化..." -ForegroundColor Cyan
+                $res = Invoke-WindowsLocalizationInstall -Target 'antigravity_ide' -Confirmed:$true
+                if ($res.status -eq 'ready') {
+                    Write-Host "✓ Antigravity IDE 中文化完成。" -ForegroundColor Green
+                } elseif ($res.status -eq 'failed') {
+                    Write-Host "✗ Antigravity IDE 中文化失敗：$($res.reason)" -ForegroundColor Red
+                }
+            }
+            "8" {
+                Write-Host "`n▶ 檢查並執行 VS Code 中文化..." -ForegroundColor Cyan
+                $res = Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true
+                if ($res.status -eq 'ready') {
+                    Write-Host "✓ VS Code 中文化完成。" -ForegroundColor Green
+                } elseif ($res.status -eq 'failed') {
+                    Write-Host "✗ VS Code 中文化失敗：$($res.reason)" -ForegroundColor Red
                 }
             }
         }

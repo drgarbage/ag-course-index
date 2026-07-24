@@ -461,34 +461,26 @@ install_macos_localization() {
   fi
 
   if [ "$target" = "vscode" ]; then
-    if [ ! -d "$MACOS_VSCODE_APP_PATH" ] && ! command -v code >/dev/null 2>&1; then
-      macos_json_state vscode failed
-      return 0
-    fi
-    local code_cmd="code"
-    if ! command -v code >/dev/null 2>&1; then
-      code_cmd="/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
-    fi
-    if ! "$code_cmd" --install-extension MS-CEINTL.vscode-language-pack-zh-hant >/dev/null 2>&1; then
-      macos_json_state vscode failed
-      return 0
+    printf '\n\033[33m[中文化設定教學] (VS Code)\033[0m\n'
+    printf '1. 在 VS Code 中按下快捷鍵 Command + Shift + P\n'
+    printf '2. 輸入 "Language" 並選取 "Configure Display Language" (設定顯示語言)\n'
+    printf '3. 選擇 "繁體中文 (Traditional Chinese)" 即可完成中文化。\n\n'
+    if [ "${NON_INTERACTIVE:-}" != "true" ]; then
+      printf '設定完成後請按 Enter 鍵繼續...'
+      read -r
     fi
     macos_json_state vscode ready
     return 0
   fi
 
   if [ "$target" = "antigravity_ide" ]; then
-    if [ ! -d "$MACOS_ANTIGRAVITY_APP_PATH" ] && ! command -v antigravity >/dev/null 2>&1; then
-      macos_json_state antigravity_ide failed
-      return 0
-    fi
-    local ag_cmd="antigravity"
-    if ! command -v antigravity >/dev/null 2>&1; then
-      ag_cmd="/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity"
-    fi
-    if ! "$ag_cmd" --install-extension MS-CEINTL.vscode-language-pack-zh-hant >/dev/null 2>&1; then
-      macos_json_state antigravity_ide failed
-      return 0
+    printf '\n\033[33m[中文化設定教學] (Antigravity IDE)\033[0m\n'
+    printf '1. 在 Antigravity IDE 中按下快捷鍵 Command + Shift + P\n'
+    printf '2. 輸入 "Language" 並選取 "Configure Display Language" (設定顯示語言)\n'
+    printf '3. 選擇 "繁體中文 (Traditional Chinese)" 即可完成中文化。\n\n'
+    if [ "${NON_INTERACTIVE:-}" != "true" ]; then
+      printf '設定完成後請按 Enter 鍵繼續...'
+      read -r
     fi
     macos_json_state antigravity_ide ready
     return 0
@@ -510,7 +502,7 @@ install_macos_localization() {
     
     local vendor_dir
     vendor_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../vendor/antigravity2-cn"
-    if ! node "$vendor_dir/localization_engine.js" --tw --brand-title translated >/dev/null 2>&1; then
+    if ! node "$vendor_dir/localization_engine.js" --tw --brand-title english >/dev/null 2>&1; then
       macos_json_state antigravity_app failed
       return 0
     fi

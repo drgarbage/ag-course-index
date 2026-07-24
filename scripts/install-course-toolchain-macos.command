@@ -212,7 +212,9 @@ install_custom() {
   printf ' 3) Cloudflare Tunnel (cloudflared)\n'
   printf ' 4) Docker Desktop (docker_desktop)\n'
   printf ' 5) GUI 工具 (Antigravity IDE, VS Code, Browser)\n'
-  printf ' 6) 中文化 (VS Code/IDE 語言包, Antigravity 2.0 漢化)\n\n'
+  printf ' 6) Antigravity 2.0 中文化\n'
+  printf ' 7) Antigravity IDE 中文化 (設定教學)\n'
+  printf ' 8) VS Code 中文化 (設定教學)\n\n'
   
   printf '請輸入編號: '
   read -r selection
@@ -258,29 +260,21 @@ install_custom() {
         fi
         ;;
       6)
-        printf '\n\033[36m▶ 檢查並安裝中文化模組...\033[0m\n'
-        printf '請選擇：1) 全部安裝 2) 僅安裝 VS Code/IDE 語言包 3) 僅安裝 Antigravity 2.0 漢化 [預設: 1]: '
-        read -r choice
-        if [ "$choice" = '2' ]; then
-          install_macos_localization vscode yes
-          install_macos_localization antigravity_ide yes
-        elif [ "$choice" = '3' ]; then
-          printf '警告：即將執行 Antigravity 2.0 中文化修改。確認要繼續嗎？ [y/N] '
-          read -r patch_confirm
-          case "$patch_confirm" in
-            y|Y|yes|YES) install_macos_localization antigravity_app yes ;;
-            *) install_macos_localization antigravity_app no ;;
-          esac
-        else
-          install_macos_localization vscode yes
-          install_macos_localization antigravity_ide yes
-          printf '警告：即將執行 Antigravity 2.0 中文化修改。確認要繼續嗎？ [y/N] '
-          read -r patch_confirm
-          case "$patch_confirm" in
-            y|Y|yes|YES) install_macos_localization antigravity_app yes ;;
-            *) install_macos_localization antigravity_app no ;;
-          esac
-        fi
+        printf '\n\033[36m▶ 檢查並執行 Antigravity 2.0 中文化...\033[0m\n'
+        printf '警告：即將執行 Antigravity 2.0 中文化修改。確認要繼續嗎？ [y/N] '
+        read -r patch_confirm
+        case "$patch_confirm" in
+          y|Y|yes|YES) install_macos_localization antigravity_app yes ;;
+          *) install_macos_localization antigravity_app no ;;
+        esac
+        ;;
+      7)
+        printf '\n\033[36m▶ 檢查並執行 Antigravity IDE 中文化...\033[0m\n'
+        install_macos_localization antigravity_ide yes
+        ;;
+      8)
+        printf '\n\033[36m▶ 檢查並執行 VS Code 中文化...\033[0m\n'
+        install_macos_localization vscode yes
         ;;
     esac
   done
@@ -290,6 +284,7 @@ install_custom() {
 
 # Check non-interactive argument
 if [ "${1:-}" = "--non-interactive" ]; then
+  export NON_INTERACTIVE=true
   install_all_tools
   exit 0
 fi

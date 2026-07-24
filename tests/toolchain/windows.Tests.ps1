@@ -561,6 +561,7 @@ Describe 'Windows toolchain localization module' {
     BeforeAll {
         $script:TempVendorDir = Join-Path $TestDrive 'vendor_test'
         New-Item -ItemType Directory -Path $script:TempVendorDir -Force | Out-Null
+        $script:NonInteractive = $true
     }
 
     It 'validates a compliant manifest and file hashes' {
@@ -598,42 +599,14 @@ Describe 'Windows toolchain localization module' {
         $res.status | Should -Be 'skipped'
     }
 
-    It 'fails when target app is missing' {
-        $res = Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true -AppProbe { $false }
-        $res.status | Should -Be 'failed'
-        $res.reason | Should -Be 'vscode_missing'
+    It 'shows VS Code language pack configuration guide' {
+        $res = Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true
+        $res.status | Should -Be 'ready'
     }
 
-    It 'installs VS Code language pack extension when app is present' {
-        $script:calledCmd = $null
-        $script:calledArgs = $null
-        $res = Invoke-WindowsLocalizationInstall -Target 'vscode' -Confirmed:$true `
-            -AppProbe { $true } `
-            -CommandRunner {
-                param($cmd, $arguments)
-                $script:calledCmd = $cmd
-                $script:calledArgs = $arguments
-                [pscustomobject]@{ exit_code = 0 }
-            }
+    It 'shows Antigravity IDE language pack configuration guide' {
+        $res = Invoke-WindowsLocalizationInstall -Target 'antigravity_ide' -Confirmed:$true
         $res.status | Should -Be 'ready'
-        $script:calledCmd | Should -Be 'code'
-        $script:calledArgs | Should -Be @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
-    }
-
-    It 'installs Antigravity IDE language pack extension when app is present' {
-        $script:calledCmd = $null
-        $script:calledArgs = $null
-        $res = Invoke-WindowsLocalizationInstall -Target 'antigravity_ide' -Confirmed:$true `
-            -AppProbe { $true } `
-            -CommandRunner {
-                param($cmd, $arguments)
-                $script:calledCmd = $cmd
-                $script:calledArgs = $arguments
-                [pscustomobject]@{ exit_code = 0 }
-            }
-        $res.status | Should -Be 'ready'
-        $script:calledCmd | Should -Be 'antigravity'
-        $script:calledArgs | Should -Be @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
     }
 
     It 'installs Antigravity 2.0 app patch with verification and confirmation gate' {

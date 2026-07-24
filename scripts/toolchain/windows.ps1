@@ -584,23 +584,27 @@ function Invoke-WindowsLocalizationInstall {
     }
 
     if ($Target -eq 'vscode') {
-        if (-not (& $AppProbe 'vscode')) {
-            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'vscode_missing' }
-        }
-        $res = & $CommandRunner 'code' @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
-        if ($res.exit_code -ne 0) {
-            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'install_failed' }
+        Write-Host "`n[中文化設定教學] (VS Code)" -ForegroundColor Yellow
+        Write-Host "1. 在 VS Code 中按下快捷鍵 Ctrl + Shift + P"
+        Write-Host "2. 輸入 'Language' 並選取 'Configure Display Language' (設定顯示語言)"
+        Write-Host "3. 選擇 '繁體中文 (Traditional Chinese)' 即可完成中文化。"
+        Write-Host ""
+        $isNonInteractive = (Test-Path 'variable:NonInteractive') -and (Get-Variable 'NonInteractive' -ValueOnly)
+        if (-not $isNonInteractive) {
+            [void](Read-Host "設定完成後請按 Enter 鍵繼續")
         }
         return [pscustomobject]@{ target = $Target; status = 'ready' }
     }
 
     if ($Target -eq 'antigravity_ide') {
-        if (-not (& $AppProbe 'antigravity')) {
-            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'antigravity_missing' }
-        }
-        $res = & $CommandRunner 'antigravity' @('--install-extension', 'MS-CEINTL.vscode-language-pack-zh-hant')
-        if ($res.exit_code -ne 0) {
-            return [pscustomobject]@{ target = $Target; status = 'failed'; reason = 'install_failed' }
+        Write-Host "`n[中文化設定教學] (Antigravity IDE)" -ForegroundColor Yellow
+        Write-Host "1. 在 Antigravity IDE 中按下快捷鍵 Ctrl + Shift + P"
+        Write-Host "2. 輸入 'Language' 並選取 'Configure Display Language' (設定顯示語言)"
+        Write-Host "3. 選擇 '繁體中文 (Traditional Chinese)' 即可完成中文化。"
+        Write-Host ""
+        $isNonInteractive = (Test-Path 'variable:NonInteractive') -and (Get-Variable 'NonInteractive' -ValueOnly)
+        if (-not $isNonInteractive) {
+            [void](Read-Host "設定完成後請按 Enter 鍵繼續")
         }
         return [pscustomobject]@{ target = $Target; status = 'ready' }
     }
