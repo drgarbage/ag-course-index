@@ -2,10 +2,41 @@
 param()
 
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "Git 與 GitHub CLI 課程環境安裝程式"
+
+# 這一段必須是腳本的第一個動作，且只能使用 ConstrainedLanguage 允許的操作
+# （屬性讀取、Write-Host、exit）。WDAC／AppLocker 會把 PowerShell 降到
+# ConstrainedLanguage，此時任何非核心型別的屬性「設定」都會直接讓腳本中止，
+# 學生只會看到一行看不懂的紅字。先擋在這裡，才有機會給出可讀的說明。
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    Write-Host ""
+    Write-Host "安裝未完成：這台電腦的 PowerShell 被限制在 $($ExecutionContext.SessionState.LanguageMode) 模式。" -ForegroundColor Red
+    Write-Host "建議處理方式：這通常是單位的資訊安全政策（WDAC／AppLocker）造成，個人帳號無法自行解除。" -ForegroundColor Yellow
+    Write-Host "請將這個畫面提供給講師，並改用另一台電腦或改為手動安裝：" -ForegroundColor Yellow
+    Write-Host "  https://git-scm.com/download/win" -ForegroundColor Cyan
+    Write-Host "  https://cli.github.com/" -ForegroundColor Cyan
+    Read-Host "按 Enter 結束"
+    exit 1
+}
+
+# 視窗標題是非核心型別的屬性設定，在受限模式下會失敗，因此放在語言模式檢查之後。
+try { $Host.UI.RawUI.WindowTitle = "Git 與 GitHub CLI 課程環境安裝程式" } catch {}
 
 $InstallSupportBaseUrl = "https://gemini.printii.com/api/install-support"
-$InstallSupportPatternPath = Join-Path $PSScriptRoot 'install-support-patterns.json'
+# 以一行指令從網路載入本腳本時 $PSScriptRoot 為空，此時沒有本機規則檔可用。
+$InstallSupportPatternPath = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    ''
+} else {
+    Join-Path $PSScriptRoot 'install-support-patterns.json'
+}
+
+# Windows PowerShell 5.1 預設可能不啟用 TLS 1.2，會讓後續 HTTPS 請求直接失敗。
+try {
+    if ([Net.ServicePointManager]::SecurityProtocol -notmatch 'Tls12') {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    }
+} catch {}
+
+$CourseGitHubScopes = @('repo', 'read:org', 'workflow')
 
 function Invoke-InstallSupportRequest {
     param([hashtable]$Request)
@@ -367,8 +398,193 @@ function Has-Command([string]$Name) {
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Get-LanguageModeState {
+    param(
+        [scriptblock]$LanguageModeProvider = { $ExecutionContext.SessionState.LanguageMode }
+    )
+
+    # WDAC／AppLocker 會把 PowerShell 降到 ConstrainedLanguage，
+    # 此時 .NET 型別呼叫會全面失敗，先擋下來比讓學生看一連串紅字好。
+    $mode = try { [string](& $LanguageModeProvider) } catch { 'Unknown' }
+    [pscustomobject]@{
+        mode = $mode
+        is_full = ($mode -eq 'FullLanguage')
+    }
+}
+
+function Get-ExecutionPolicyState {
+    param(
+        [scriptblock]$PolicyProvider = { Get-ExecutionPolicy -List },
+        [scriptblock]$EffectiveProvider = { Get-ExecutionPolicy }
+    )
+
+    $permissive = @('RemoteSigned', 'Unrestricted', 'Bypass')
+    $effective = [string](& $EffectiveProvider)
+    $lockedByPolicy = $false
+    foreach ($entry in @(& $PolicyProvider)) {
+        $scope = [string]$entry.Scope
+        $value = [string]$entry.ExecutionPolicy
+        if ($scope -in @('MachinePolicy', 'UserPolicy') -and $value -notin @('Undefined', '')) {
+            # 群組原則的設定優先於 CurrentUser，學生自己改不動。
+            if ($value -notin $permissive) { $lockedByPolicy = $true }
+        }
+    }
+
+    [pscustomobject]@{
+        effective = $effective
+        allows_local_script = ($effective -in $permissive)
+        locked_by_group_policy = $lockedByPolicy
+    }
+}
+
+function Set-CourseExecutionPolicy {
+    param(
+        [scriptblock]$PolicySetter = { Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force }
+    )
+
+    try {
+        & $PolicySetter
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Unblock-CourseScriptFile {
+    param(
+        [string]$Directory,
+        [scriptblock]$Unblocker = { param($path) Unblock-File -LiteralPath $path -ErrorAction Stop }
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Directory)) { return 0 }
+    $unblocked = 0
+    foreach ($file in @(Get-ChildItem -LiteralPath $Directory -Filter '*.ps1' -File -ErrorAction SilentlyContinue)) {
+        try {
+            & $Unblocker $file.FullName
+            $unblocked++
+        } catch {}
+    }
+    return $unblocked
+}
+
+function Test-CourseElevation {
+    param(
+        [scriptblock]$IdentityProvider = {
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole(
+                [Security.Principal.WindowsBuiltInRole]::Administrator)
+        }
+    )
+
+    try { return [bool](& $IdentityProvider) } catch { return $false }
+}
+
+function Test-DefaultBrowserAssociation {
+    param(
+        [scriptblock]$AssociationProvider = {
+            $key = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice'
+            (Get-ItemProperty -Path $key -Name ProgId -ErrorAction Stop).ProgId
+        }
+    )
+
+    try {
+        $progId = [string](& $AssociationProvider)
+        return -not [string]::IsNullOrWhiteSpace($progId)
+    } catch {
+        return $false
+    }
+}
+
+function Test-GitHubLoginPrerequisite {
+    param(
+        [scriptblock]$NetworkProbe = {
+            if ($null -eq (Get-Command 'curl.exe' -ErrorAction SilentlyContinue)) { return $true }
+            & curl.exe --head --silent --show-error --max-time 10 https://github.com *> $null
+            return ($LASTEXITCODE -eq 0)
+        },
+        [scriptblock]$BrowserProbe = { Test-DefaultBrowserAssociation }
+    )
+
+    $blockers = @()
+    if (-not (& $NetworkProbe)) { $blockers += 'network' }
+    if (-not (& $BrowserProbe)) { $blockers += 'browser' }
+
+    [pscustomobject]@{
+        ready = ($blockers.Count -eq 0)
+        blockers = $blockers
+    }
+}
+
+function Get-GitHubAuthState {
+    param(
+        [string[]]$RequiredScopes = @('repo', 'read:org', 'workflow'),
+        [scriptblock]$StatusProvider = {
+            $text = (& gh auth status --hostname github.com 2>&1 | Out-String)
+            [pscustomobject]@{ exit_code = $LASTEXITCODE; text = $text }
+        }
+    )
+
+    $status = & $StatusProvider
+    $text = [string]$status.text
+    if ([int]$status.exit_code -ne 0) {
+        return [pscustomobject]@{ state = 'not_logged_in'; missing_scopes = @(); text = $text }
+    }
+
+    $granted = @()
+    foreach ($line in ($text -split "`r?`n")) {
+        if ($line -match '(?i)token scopes:\s*(.+)$') {
+            $granted = @($Matches[1] -split '[,\s]+' |
+                ForEach-Object { $_.Trim().Trim("'").Trim('"') } |
+                Where-Object { $_ })
+        }
+    }
+
+    # gh 未回報 scope 行時無從判斷，視為足夠以免誤擋已經可用的環境。
+    if ($granted.Count -eq 0) {
+        return [pscustomobject]@{ state = 'authenticated'; missing_scopes = @(); text = $text }
+    }
+
+    $missing = @($RequiredScopes | Where-Object { $_ -notin $granted })
+    if ($missing.Count -gt 0) {
+        return [pscustomobject]@{ state = 'insufficient_scope'; missing_scopes = $missing; text = $text }
+    }
+    [pscustomobject]@{ state = 'authenticated'; missing_scopes = @(); text = $text }
+}
+
 Write-Host "Git 與 GitHub CLI 課程環境安裝程式" -ForegroundColor White
 Write-Host "程式只會安裝官方套件、設定 Git，並開啟 GitHub 官方登入頁。"
+
+Write-Step "檢查執行環境權限"
+# 受限模式已在腳本開頭擋掉，這裡只是把結果顯示給學生看。
+Write-Ok "PowerShell 語言模式：$((Get-LanguageModeState).mode)"
+
+$unblockedCount = Unblock-CourseScriptFile -Directory $PSScriptRoot
+if ($unblockedCount -gt 0) {
+    Write-Ok "已解除 $unblockedCount 個下載檔案的封鎖標記"
+}
+
+$policyState = Get-ExecutionPolicyState
+if ($policyState.allows_local_script) {
+    Write-Ok "PowerShell 指令碼執行政策：$($policyState.effective)"
+} elseif ($policyState.locked_by_group_policy) {
+    Write-WarnZh "指令碼執行政策由群組原則鎖定為 $($policyState.effective)，個人帳號無法自行變更。"
+    Write-Host "  請改用下列方式啟動本程式（單次繞過，不變更系統設定）："
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .\install-git-gh-windows.ps1" -ForegroundColor Cyan
+} else {
+    Write-WarnZh "目前指令碼執行政策為 $($policyState.effective)，之後重新執行本程式可能會被阻擋。"
+    Write-Host "  即將為你的使用者帳號套用 RemoteSigned（只影響目前登入帳號，不需系統管理員權限）。"
+    if (Set-CourseExecutionPolicy) {
+        Write-Ok "已設定執行政策：$((Get-ExecutionPolicyState).effective)"
+    } else {
+        Write-WarnZh "自動設定失敗，請自行執行：Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"
+    }
+}
+
+if (Test-CourseElevation) {
+    Write-Ok "目前以系統管理員身分執行"
+} else {
+    Write-Host "  目前不是系統管理員；安裝 Git 時可能出現「使用者帳戶控制（UAC）」提示，請按「是」。"
+}
 
 Write-Step "檢查 WinGet"
 if (-not (Has-Command "winget")) {
@@ -411,6 +627,71 @@ if (Has-Command "gh") {
     Write-Ok "安裝完成：$(gh --version | Select-Object -First 1)"
 }
 
+Write-Step "檢查 GitHub 登入"
+$authState = Get-GitHubAuthState -RequiredScopes $CourseGitHubScopes
+if ($authState.state -eq 'authenticated') {
+    Write-Ok "GitHub CLI 已登入且授權範圍足夠"
+    & gh auth status --hostname github.com
+} elseif ($authState.state -eq 'insufficient_scope') {
+    $missing = $authState.missing_scopes -join ', '
+    Write-WarnZh "已登入，但授權範圍不足（缺少：$missing）。課程操作會在後續步驟失敗，現在補齊授權。"
+    Write-Host "  即將開啟瀏覽器補授權，不需要重新登入。"
+    & gh auth refresh --hostname github.com -s ($CourseGitHubScopes -join ',')
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Zh "GitHub 授權範圍補齊失敗（缺少：$missing）。" `
+            "請自行執行下列指令後重新執行本程式：gh auth refresh --hostname github.com -s $($CourseGitHubScopes -join ',')" 'github_auth'
+    }
+    Write-Ok "授權範圍已補齊"
+} else {
+    Write-WarnZh "尚未登入、授權已失效，或舊憑證無法使用。接下來會協助你登入 GitHub。"
+
+    $prerequisite = Test-GitHubLoginPrerequisite
+    if (-not $prerequisite.ready) {
+        if ('network' -in $prerequisite.blockers) {
+            Stop-Zh "目前無法連線到 github.com，登入流程一定會失敗。" `
+                "確認網路、VPN、防火牆或學校代理伺服器設定，能用瀏覽器開啟 https://github.com 之後再重新執行本程式。" 'network'
+        }
+        Write-WarnZh "找不到預設瀏覽器設定；若登入頁沒有自動開啟，請手動複製畫面上的網址到瀏覽器。"
+    }
+
+    $hasAccount = Read-Host "你是否已經有 GitHub 帳號？(Y/n，若不確定就按 Enter)"
+    if ($hasAccount -match '^(n|no|否)$') {
+        Write-Host "  尚未有帳號沒關係，先完成註冊再繼續。"
+        Write-Host "  即將開啟 GitHub 註冊頁面：https://github.com/signup"
+        Write-Host "  若你想直接用 Google／Gmail 帳號註冊，請在該頁面選擇「Continue with Google」，並完成畫面上要求的使用者名稱等設定。"
+        try { Start-Process "https://github.com/signup" } catch {}
+        Read-Host "完成註冊（包含設定使用者名稱）後，按 Enter 繼續"
+    }
+
+    $loggedIn = $false
+    $maxAttempts = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        Write-Host "  正在開啟 GitHub 網頁登入（第 $attempt/$maxAttempts 次）。請登入正確帳號並完成裝置授權；完成前不要關閉這個視窗。"
+        & gh auth login --hostname github.com --git-protocol https --web -s ($CourseGitHubScopes -join ',')
+        if ($LASTEXITCODE -eq 0) {
+            $loggedIn = $true
+            break
+        }
+
+        Write-WarnZh "這次登入沒有成功。常見原因：註冊尚未完成（例如用 Google 登入後還沒設定 GitHub 使用者名稱）、瀏覽器分頁忘記按授權、或是等待逾時。"
+        if ($attempt -lt $maxAttempts) {
+            $retry = Read-Host "要再試一次嗎？(Y/n)"
+            if ($retry -match '^(n|no|否)$') { break }
+        }
+    }
+
+    if (-not $loggedIn) {
+        Write-Host "`n你可以自行複製下列指令，在本視窗貼上並執行，完成登入後再重新執行本程式："
+        Write-Host "  gh auth login --hostname github.com --git-protocol https --web" -ForegroundColor Cyan
+        Write-Host "  若瀏覽器授權一直失敗，可改用互動模式並選擇貼上權杖（Paste an authentication token）："
+        Write-Host "  gh auth login --hostname github.com --git-protocol https" -ForegroundColor Cyan
+        Write-Host "  若電腦上有多個 GitHub 帳號，請先切換帳號："
+        Write-Host "  gh auth switch --hostname github.com" -ForegroundColor Cyan
+        Stop-Zh "GitHub 網頁登入未完成。" `
+            "在本視窗執行 gh auth login --hostname github.com --git-protocol https --web 完成登入；若剛用 Google 帳號註冊，請先確認已設定好 GitHub 使用者名稱。" 'github_auth'
+    }
+}
+
 Write-Step "設定 Git 提交身分"
 $currentName = git config --global user.name
 $currentEmail = git config --global user.email
@@ -433,46 +714,9 @@ do {
 git config --global user.name "$currentName"
 git config --global user.email "$currentEmail"
 git config --global init.defaultBranch main
-Write-Ok "Git 身分與預設分支已設定"
-
-Write-Step "檢查 GitHub 登入"
-& gh auth status --hostname github.com *> $null
-if ($LASTEXITCODE -ne 0) {
-    Write-WarnZh "尚未登入、授權已失效，或舊憑證無法使用。接下來會協助你登入 GitHub。"
-
-    $hasAccount = Read-Host "你是否已經有 GitHub 帳號？(Y/n，若不確定就按 Enter)"
-    if ($hasAccount -match '^(n|no|否)$') {
-        Write-Host "  尚未有帳號沒關係，先完成註冊再繼續。"
-        Write-Host "  即將開啟 GitHub 註冊頁面：https://github.com/signup"
-        Write-Host "  若你想直接用 Google／Gmail 帳號註冊，請在該頁面選擇「Continue with Google」，並完成畫面上要求的使用者名稱等設定。"
-        try { Start-Process "https://github.com/signup" } catch {}
-        Read-Host "完成註冊（包含設定使用者名稱）後，按 Enter 繼續"
-    }
-
-    $loggedIn = $false
-    $maxAttempts = 3
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        Write-Host "  正在開啟 GitHub 網頁登入（第 $attempt/$maxAttempts 次）。請登入正確帳號並完成裝置授權；完成前不要關閉這個視窗。"
-        & gh auth login --hostname github.com --git-protocol https --web
-        if ($LASTEXITCODE -eq 0) {
-            $loggedIn = $true
-            break
-        }
-
-        Write-WarnZh "這次登入沒有成功。常見原因：註冊尚未完成（例如用 Google 登入後還沒設定 GitHub 使用者名稱）、瀏覽器分頁忘記按授權、或是等待逾時。"
-        if ($attempt -lt $maxAttempts) {
-            $retry = Read-Host "要再試一次嗎？(Y/n)"
-            if ($retry -match '^(n|no|否)$') { break }
-        }
-    }
-
-    if (-not $loggedIn) {
-        Stop-Zh "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱），再重新執行本程式。若有多個帳號，先執行 gh auth switch。" 'github_auth'
-    }
-} else {
-    Write-Ok "GitHub CLI 已登入"
-    & gh auth status --hostname github.com
-}
+# Windows 預設 260 字元路徑上限會讓課程專案 clone 失敗。
+git config --global core.longpaths true
+Write-Ok "Git 身分、預設分支與長路徑支援已設定"
 
 Write-Step "讓 Git 使用 GitHub CLI 保存 HTTPS 憑證"
 & gh config set git_protocol https --host github.com
@@ -486,8 +730,12 @@ Write-Step "最終驗證"
 $failed = $false
 if (-not (Has-Command "git")) { Write-WarnZh "找不到 Git"; $failed = $true }
 if (-not (Has-Command "gh")) { Write-WarnZh "找不到 GitHub CLI"; $failed = $true }
-& gh auth status --hostname github.com *> $null
-if ($LASTEXITCODE -ne 0) { Write-WarnZh "GitHub 授權驗證失敗"; $failed = $true }
+$finalAuthState = Get-GitHubAuthState -RequiredScopes $CourseGitHubScopes
+if ($finalAuthState.state -eq 'not_logged_in') { Write-WarnZh "GitHub 授權驗證失敗"; $failed = $true }
+elseif ($finalAuthState.state -eq 'insufficient_scope') {
+    Write-WarnZh "GitHub 授權範圍不足（缺少：$($finalAuthState.missing_scopes -join ', ')）"
+    $failed = $true
+}
 $helper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
 if (-not $helper) { Write-WarnZh "找不到 Git 憑證助手設定"; $failed = $true }
 if ($failed) {

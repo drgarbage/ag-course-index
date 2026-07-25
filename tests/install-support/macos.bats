@@ -259,6 +259,105 @@ STUB
   [ "$(json_field "$(cat "$INSTALL_SUPPORT_PREVIOUS_LOG")" local_pattern_key)" = 'macos.gh_missing.v1' ]
 }
 
+@test "auth state reports not_logged_in when gh exits non-zero" {
+  failing_status() { printf 'You are not logged into any GitHub hosts.'; return 1; }
+  [ "$(github_auth_state "$COURSE_GITHUB_SCOPES" failing_status)" = not_logged_in ]
+}
+
+@test "auth state reports the exact missing scopes when the token is too narrow" {
+  narrow_status() { printf "  - Token scopes: 'gist', 'read:org', 'repo'"; }
+  [ "$(github_auth_state 'repo,read:org,workflow' narrow_status)" = 'insufficient_scope:workflow' ]
+}
+
+@test "auth state reports every missing scope, not just the first" {
+  minimal_status() { printf "  - Token scopes: 'gist'"; }
+  [ "$(github_auth_state 'repo,read:org,workflow' minimal_status)" = 'insufficient_scope:repo,read:org,workflow' ]
+}
+
+@test "auth state accepts a token covering every required scope" {
+  full_status() { printf "  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'"; }
+  [ "$(github_auth_state 'repo,read:org,workflow' full_status)" = authenticated ]
+}
+
+@test "auth state does not lock out a working environment with no scope line" {
+  no_scope_status() { printf '  - Logged in to github.com account someone (keychain)'; }
+  [ "$(github_auth_state 'repo' no_scope_status)" = authenticated ]
+}
+
+@test "login prerequisite blocks on network before the browser wait" {
+  probe_ok() { return 0; }
+  probe_bad() { return 1; }
+  [ "$(github_login_prerequisite probe_bad probe_ok)" = 'network' ]
+  [ "$(github_login_prerequisite probe_ok probe_bad)" = 'browser' ]
+  [ "$(github_login_prerequisite probe_bad probe_bad)" = 'network browser' ]
+  [ "$(github_login_prerequisite probe_ok probe_ok)" = 'ready' ]
+}
+
+@test "quarantine and executable-bit helpers stay no-ops when nothing needs fixing" {
+  target="$BATS_TEST_TMPDIR/sample.command"
+  printf '#!/bin/bash\n' > "$target"
+  chmod +x "$target"
+  # 已可執行時不應回報有修改。
+  run ensure_own_executable_bit "$target"
+  [ "$status" -ne 0 ]
+
+  # 缺少路徑或檔案不存在時，兩個 helper 都必須安靜地不做事。
+  run ensure_own_executable_bit ""
+  [ "$status" -ne 0 ]
+  run ensure_own_executable_bit "$BATS_TEST_TMPDIR/does-not-exist"
+  [ "$status" -ne 0 ]
+  run clear_own_quarantine ""
+  [ "$status" -ne 0 ]
+  run clear_own_quarantine "$BATS_TEST_TMPDIR/does-not-exist"
+  [ "$status" -ne 0 ]
+}
+
+@test "executable-bit helper restores a lost execute permission" {
+  target="$BATS_TEST_TMPDIR/lost-exec.command"
+  printf '#!/bin/bash\n' > "$target"
+  chmod -x "$target"
+  # NTFS／Git Bash 無法真正清除執行位元，該環境下這個分支無從驗證。
+  if [ -x "$target" ]; then
+    skip "此檔案系統不支援清除執行位元"
+  fi
+  run ensure_own_executable_bit "$target"
+  [ "$status" -eq 0 ]
+  [ -x "$target" ]
+}
+
+@test "xcode license state detects the admin-privileges error" {
+  git() { printf 'Agreeing to the Xcode/iOS license requires admin privileges\n' >&2; return 69; }
+  export -f git
+  [ "$(xcode_license_state)" = not_accepted ]
+}
+
+@test "xcode license state does not misreport an unrelated git failure" {
+  git() { printf 'git: command not found\n' >&2; return 127; }
+  export -f git
+  [ "$(xcode_license_state)" = unknown ]
+}
+
+@test "login failure keeps the AI helper and support-code path" {
+  # antigravity 曾把這裡改成純 exit 1，使 macos.auth_missing.v1 失去唯一呼叫點。
+  run grep -c 'fail "GitHub 網頁登入未完成。"' "$INSTALLER"
+  [ "$output" = "1" ]
+  run grep -F 'github_auth' "$INSTALLER"
+  [ "$status" -eq 0 ]
+}
+
+@test "login requests the course scopes so a fresh login is not immediately insufficient" {
+  run grep -F 'gh auth login --hostname github.com --git-protocol https --web -s "$COURSE_GITHUB_SCOPES"' "$INSTALLER"
+  [ "$status" -eq 0 ]
+}
+
+@test "github login check runs before git identity setup" {
+  auth_line="$(grep -n '^step "檢查 GitHub 登入"' "$INSTALLER" | cut -d: -f1)"
+  identity_line="$(grep -n '^step "設定 Git 提交身分"' "$INSTALLER" | cut -d: -f1)"
+  [ -n "$auth_line" ]
+  [ -n "$identity_line" ]
+  [ "$auth_line" -lt "$identity_line" ]
+}
+
 @test "versioned rules file has strict schema and no executable fields" {
   rules="$BATS_TEST_DIRNAME/../../scripts/install-support-patterns.json"
   [ -f "$rules" ]

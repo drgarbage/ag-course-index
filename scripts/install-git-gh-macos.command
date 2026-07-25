@@ -290,8 +290,110 @@ r=json.loads(sys.argv[1]); print(json.dumps({k:r[k] for k in ("local_pattern_key
   return 5
 }
 
+COURSE_GITHUB_SCOPES="repo,read:org,workflow"
+
+# 從瀏覽器下載的 .command 會被標記隔離，雙擊時 Gatekeeper 會直接擋掉。
+clear_own_quarantine() {
+  local target="${1:-}"
+  [ -n "$target" ] && [ -f "$target" ] || return 1
+  has_command xattr || return 1
+  xattr -p com.apple.quarantine "$target" >/dev/null 2>&1 || return 1
+  xattr -d com.apple.quarantine "$target" >/dev/null 2>&1
+}
+
+# 透過瀏覽器下載後執行位元常會遺失，導致 permission denied。
+ensure_own_executable_bit() {
+  local target="${1:-}"
+  [ -n "$target" ] && [ -f "$target" ] || return 1
+  [ -x "$target" ] && return 1
+  chmod +x "$target" >/dev/null 2>&1
+}
+
+# 未同意 Xcode 授權條款時，git 每次都會以錯誤結束，且需要管理員權限才能同意。
+xcode_license_state() {
+  local probe_output
+  probe_output="$(git --version 2>&1)" || {
+    if printf '%s' "$probe_output" | grep -qi 'license'; then
+      printf 'not_accepted'
+      return 0
+    fi
+    printf 'unknown'
+    return 0
+  }
+  printf 'accepted'
+}
+
+default_browser_available() {
+  has_command open || return 1
+  # LaunchServices 沒有 https handler 時 open 會失敗，先做無害探測。
+  open -Ra Safari >/dev/null 2>&1 && return 0
+  [ -n "$(mdfind -name 'kMDItemCFBundleIdentifier == com.google.Chrome' 2>/dev/null | head -n 1)" ] && return 0
+  return 1
+}
+
+# 回傳 ready 或以空白分隔的阻擋原因（network／browser）。
+github_login_prerequisite() {
+  local network_probe="${1:-default_github_network_probe}"
+  local browser_probe="${2:-default_browser_available}"
+  local blockers=''
+  "$network_probe" || blockers="network"
+  "$browser_probe" || blockers="${blockers:+$blockers }browser"
+  [ -n "$blockers" ] || { printf 'ready'; return 0; }
+  printf '%s' "$blockers"
+}
+
+default_github_network_probe() {
+  has_command curl || return 0
+  curl --head --silent --show-error --max-time 10 https://github.com >/dev/null 2>&1
+}
+
+# 回傳 not_logged_in、insufficient_scope:<缺少的 scope>，或 authenticated。
+github_auth_state() {
+  local required_scopes="${1:-$COURSE_GITHUB_SCOPES}"
+  local status_provider="${2:-default_gh_auth_status}"
+  local status_text granted missing scope
+  if ! status_text="$("$status_provider" 2>&1)"; then
+    printf 'not_logged_in'
+    return 0
+  fi
+  granted="$(printf '%s' "$status_text" \
+    | sed -nE 's/.*[Tt]oken scopes:[[:space:]]*(.*)$/\1/p' \
+    | tr -d "'\"" | tr ',' ' ' | tr -s ' ')"
+  # gh 未回報 scope 行時無從判斷，視為足夠以免誤擋已經可用的環境。
+  [ -n "$(printf '%s' "$granted" | tr -d '[:space:]')" ] || { printf 'authenticated'; return 0; }
+  missing=''
+  for scope in $(printf '%s' "$required_scopes" | tr ',' ' '); do
+    printf ' %s ' "$granted" | grep -Fq " $scope " || missing="${missing:+$missing,}$scope"
+  done
+  [ -n "$missing" ] && { printf 'insufficient_scope:%s' "$missing"; return 0; }
+  printf 'authenticated'
+}
+
+default_gh_auth_status() { gh auth status --hostname github.com 2>&1; }
+
 printf '\033[1mGit 與 GitHub CLI 課程環境安裝程式\033[0m\n'
 printf '程式只會安裝官方工具、設定 Git，並開啟 GitHub 官方登入頁。\n'
+
+step "檢查執行環境權限"
+SELF_PATH="${BASH_SOURCE[0]:-$0}"
+if clear_own_quarantine "$SELF_PATH"; then
+  ok "已移除下載檔案的隔離標記（Gatekeeper）"
+fi
+if ensure_own_executable_bit "$SELF_PATH"; then
+  ok "已補上檔案執行權限"
+fi
+case "$(xcode_license_state)" in
+  not_accepted)
+    warn "尚未同意 Xcode 命令列工具授權條款，Git 目前無法使用。"
+    printf '  請執行下列指令並輸入你的 Mac 密碼，同意條款後回到這裡：\n'
+    printf '  \033[36msudo xcodebuild -license accept\033[0m\n'
+    read -r -p "完成後按 Enter 繼續："
+    [ "$(xcode_license_state)" = not_accepted ] && \
+      fail "Xcode 授權條款仍未同意，Git 無法使用。" "在終端機執行 sudo xcodebuild -license accept，輸入 Mac 密碼並同意條款後，再重新執行本程式。" xcode_tools
+    ok "Xcode 授權條款已同意"
+    ;;
+  accepted) ok "Xcode 命令列工具授權條款已同意" ;;
+esac
 
 step "檢查並安裝 Git"
 if xcode-select -p >/dev/null 2>&1 && has_command git; then
@@ -303,6 +405,9 @@ else
   read -r -p "完成後按 Enter 繼續："
   if ! xcode-select -p >/dev/null 2>&1 || ! has_command git; then
     fail "仍找不到 Git。" "到「系統設定 → 一般 → 軟體更新」完成 Command Line Tools 更新，重新開機後再執行本程式。" xcode_tools
+  fi
+  if [ "$(xcode_license_state)" = not_accepted ]; then
+    fail "Git 已安裝，但尚未同意 Xcode 授權條款。" "在終端機執行 sudo xcodebuild -license accept，輸入 Mac 密碼並同意條款後，再重新執行本程式。" xcode_tools
   fi
   ok "安裝完成：$(git --version)"
 fi
@@ -343,6 +448,72 @@ else
   ok "安裝完成：$(gh --version | head -n 1)"
 fi
 
+step "檢查 GitHub 登入"
+AUTH_STATE="$(github_auth_state "$COURSE_GITHUB_SCOPES")"
+case "$AUTH_STATE" in
+  authenticated)
+    ok "GitHub CLI 已登入且授權範圍足夠"
+    gh auth status --hostname github.com
+    ;;
+  insufficient_scope:*)
+    MISSING_SCOPES="${AUTH_STATE#insufficient_scope:}"
+    warn "已登入，但授權範圍不足（缺少：$MISSING_SCOPES）。課程操作會在後續步驟失敗，現在補齊授權。"
+    printf '  即將開啟瀏覽器補授權，不需要重新登入。\n'
+    gh auth refresh --hostname github.com -s "$COURSE_GITHUB_SCOPES" || \
+      fail "GitHub 授權範圍補齊失敗（缺少：$MISSING_SCOPES）。" "請自行執行 gh auth refresh --hostname github.com -s $COURSE_GITHUB_SCOPES，完成後重新執行本程式。" github_auth
+    ok "授權範圍已補齊"
+    ;;
+esac
+if [ "$AUTH_STATE" = not_logged_in ]; then
+  warn "尚未登入、授權已失效，或系統鑰匙圈中的舊憑證無法使用。接下來會協助你登入 GitHub。"
+
+  PREREQUISITE="$(github_login_prerequisite)"
+  case "$PREREQUISITE" in
+    *network*)
+      fail "目前無法連線到 github.com，登入流程一定會失敗。" "確認網路、VPN、防火牆或學校代理伺服器設定，能用瀏覽器開啟 https://github.com 之後再重新執行本程式。" network
+      ;;
+  esac
+  case "$PREREQUISITE" in
+    *browser*)
+      warn "找不到可用的預設瀏覽器；若登入頁沒有自動開啟，請手動複製畫面上的網址到瀏覽器。"
+      ;;
+  esac
+
+  read -r -p "你是否已經有 GitHub 帳號？(Y/n，若不確定就按 Enter)：" HAS_ACCOUNT
+  if printf '%s' "$HAS_ACCOUNT" | grep -Eiq '^(n|no|否)$'; then
+    printf '  尚未有帳號沒關係，先完成註冊再繼續。\n'
+    printf '  即將開啟 GitHub 註冊頁面：https://github.com/signup\n'
+    printf '  若你想直接用 Google／Gmail 帳號註冊，請在該頁面選擇「Continue with Google」，並完成畫面上要求的使用者名稱等設定。\n'
+    open "https://github.com/signup" >/dev/null 2>&1 || true
+    read -r -p "完成註冊（包含設定使用者名稱）後，按 Enter 繼續："
+  fi
+
+  LOGGED_IN=0
+  MAX_ATTEMPTS=3
+  for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+    printf '  正在開啟 GitHub 網頁登入（第 %s/%s 次）。請登入正確帳號並完成裝置授權；完成前不要關閉這個視窗。\n' "$ATTEMPT" "$MAX_ATTEMPTS"
+    if gh auth login --hostname github.com --git-protocol https --web -s "$COURSE_GITHUB_SCOPES"; then
+      LOGGED_IN=1
+      break
+    fi
+    warn "這次登入沒有成功。常見原因：註冊尚未完成（例如用 Google 登入後還沒設定 GitHub 使用者名稱）、瀏覽器分頁忘記按授權、或是等待逾時。"
+    if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+      read -r -p "要再試一次嗎？(Y/n)：" RETRY
+      if printf '%s' "$RETRY" | grep -Eiq '^(n|no|否)$'; then break; fi
+    fi
+  done
+
+  [ "$LOGGED_IN" -eq 1 ] || {
+    printf '\n你可以自行複製下列指令，在本視窗貼上並執行，完成登入後再重新執行本程式：\n'
+    printf '  \033[36mgh auth login --hostname github.com --git-protocol https --web\033[0m\n'
+    printf '  若瀏覽器授權一直失敗，可改用互動模式並選擇貼上權杖（Paste an authentication token）：\n'
+    printf '  \033[36mgh auth login --hostname github.com --git-protocol https\033[0m\n'
+    printf '  若這台電腦上有多個 GitHub 帳號，請先切換帳號：\n'
+    printf '  \033[36mgh auth switch --hostname github.com\033[0m\n'
+    fail "GitHub 網頁登入未完成。" "在本視窗執行 gh auth login --hostname github.com --git-protocol https --web 完成登入；若剛用 Google 帳號註冊，請先確認已設定好 GitHub 使用者名稱。若鑰匙圈一直詢問密碼，請開啟「鑰匙圈存取」確認登入鑰匙圈已解鎖。" github_auth
+  }
+fi
+
 step "設定 Git 提交身分"
 CURRENT_NAME="$(git config --global user.name 2>/dev/null || true)"
 CURRENT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
@@ -367,41 +538,6 @@ git config --global user.email "$CURRENT_EMAIL" || fail "無法保存 Git 信箱
 git config --global init.defaultBranch main
 ok "Git 身分與預設分支已設定"
 
-step "檢查 GitHub 登入"
-if gh auth status --hostname github.com >/dev/null 2>&1; then
-  ok "GitHub CLI 已登入"
-  gh auth status --hostname github.com
-else
-  warn "尚未登入、授權已失效，或系統鑰匙圈中的舊憑證無法使用。接下來會協助你登入 GitHub。"
-
-  read -r -p "你是否已經有 GitHub 帳號？(Y/n，若不確定就按 Enter)：" HAS_ACCOUNT
-  if printf '%s' "$HAS_ACCOUNT" | grep -Eiq '^(n|no|否)$'; then
-    printf '  尚未有帳號沒關係，先完成註冊再繼續。\n'
-    printf '  即將開啟 GitHub 註冊頁面：https://github.com/signup\n'
-    printf '  若你想直接用 Google／Gmail 帳號註冊，請在該頁面選擇「Continue with Google」，並完成畫面上要求的使用者名稱等設定。\n'
-    open "https://github.com/signup" >/dev/null 2>&1 || true
-    read -r -p "完成註冊（包含設定使用者名稱）後，按 Enter 繼續："
-  fi
-
-  LOGGED_IN=0
-  MAX_ATTEMPTS=3
-  for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
-    printf '  正在開啟 GitHub 網頁登入（第 %s/%s 次）。請登入正確帳號並完成裝置授權；完成前不要關閉這個視窗。\n' "$ATTEMPT" "$MAX_ATTEMPTS"
-    if gh auth login --hostname github.com --git-protocol https --web; then
-      LOGGED_IN=1
-      break
-    fi
-    warn "這次登入沒有成功。常見原因：註冊尚未完成（例如用 Google 登入後還沒設定 GitHub 使用者名稱）、瀏覽器分頁忘記按授權、或是等待逾時。"
-    if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
-      read -r -p "要再試一次嗎？(Y/n)：" RETRY
-      if printf '%s' "$RETRY" | grep -Eiq '^(n|no|否)$'; then break; fi
-    fi
-  done
-
-  [ "$LOGGED_IN" -eq 1 ] || \
-    fail "GitHub 網頁登入未完成。" "先確認你能用瀏覽器正常登入 github.com（若剛用 Google 帳號註冊，請確認已設定好 GitHub 使用者名稱）。若鑰匙圈一直詢問密碼，請開啟「鑰匙圈存取」確認登入鑰匙圈已解鎖，再重新執行本程式。" github_auth
-fi
-
 step "讓 Git 使用 GitHub CLI 保存 HTTPS 憑證"
 gh config set git_protocol https --host github.com || fail "無法設定 HTTPS。" "執行 gh auth status 確認登入狀態。" credential_helper
 gh auth setup-git --hostname github.com || \
@@ -412,7 +548,11 @@ step "最終驗證"
 FAILED=0
 has_command git || { warn "找不到 Git"; FAILED=1; }
 has_command gh || { warn "找不到 GitHub CLI"; FAILED=1; }
-gh auth status --hostname github.com >/dev/null 2>&1 || { warn "GitHub 授權驗證失敗"; FAILED=1; }
+FINAL_AUTH_STATE="$(github_auth_state "$COURSE_GITHUB_SCOPES")"
+case "$FINAL_AUTH_STATE" in
+  not_logged_in) warn "GitHub 授權驗證失敗"; FAILED=1 ;;
+  insufficient_scope:*) warn "GitHub 授權範圍不足（缺少：${FINAL_AUTH_STATE#insufficient_scope:}）"; FAILED=1 ;;
+esac
 HELPER="$(git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>/dev/null || true)"
 [ -n "$HELPER" ] || { warn "找不到 Git 憑證助手設定"; FAILED=1; }
 [ "$FAILED" -eq 0 ] || fail "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。" credential_helper

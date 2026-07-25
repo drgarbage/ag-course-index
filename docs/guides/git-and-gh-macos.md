@@ -26,13 +26,34 @@ chmod +x ./install-git-gh-macos.command
 
 > 這行指令會將腳本下載到系統暫存檔、執行後刪除。請只使用本專案提供的 `raw.githubusercontent.com/drgarbage/ag-course-index` 網址。
 
+## 檔案被系統阻擋時
+
+從瀏覽器下載的 `.command` 會被 macOS 標記隔離，雙擊時 Gatekeeper 會顯示「無法打開，因為它來自未識別的開發者」。**建議直接用上方「快速安裝」的一行指令**，可完全避開這個問題。若你已經下載檔案：
+
+```bash
+xattr -d com.apple.quarantine ./install-git-gh-macos.command
+chmod +x ./install-git-gh-macos.command
+```
+
+安裝程式啟動時也會自動嘗試移除自己的隔離標記並補上執行權限。
+
+若 `git` 出現 `Agreeing to the Xcode/iOS license requires admin privileges`，請執行並輸入 Mac 密碼：
+
+```bash
+sudo xcodebuild -license accept
+```
+
 ## 程式會處理的常見狀況
 
+- 下載檔案被 Gatekeeper 隔離或缺少執行權限：自動移除隔離標記並補上執行權限。
+- 尚未同意 Xcode 授權條款：偵測並引導執行 `sudo xcodebuild -license accept`。
 - 已安裝 Git 或 `gh`：保留現有安裝並繼續設定。
 - 尚未安裝 Apple Command Line Tools：啟動官方安裝視窗並等待確認。
 - 未安裝 Homebrew：直接從 GitHub 官方 Release 安裝 `gh` 到 `~/.local/bin`。
 - PATH 未包含 `~/.local/bin`：加入 `~/.zprofile` 並立即套用。
-- GitHub 憑證失效或 Git 未使用 `gh` 憑證：重新登入並設定 credential helper。
+- **登入前先檢查前置條件**：連不到 github.com 時直接說明是網路問題，不會讓你白等瀏覽器授權逾時。
+- GitHub 憑證失效或 Git 未使用 `gh` 憑證：重新登入並設定 credential helper，並在失敗時顯示可直接複製貼上的 `gh auth login` 指令。
+- **已登入但授權範圍不足**：自動執行 `gh auth refresh` 補齊 `repo`、`read:org`、`workflow`。
 - macOS 鑰匙圈無法保存憑證：顯示警告及「鑰匙圈存取」檢查方向。
 
 ## 手動檢查

@@ -1,9 +1,11 @@
-﻿Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
+﻿# param 必須是腳本的第一個宣告；放在其他語句之後會導致 -Scenario 永遠無法繫結，
+# 在 Set-StrictMode 之下會直接擲出「變數尚未設定」而讓整個沙盒測試中止。
 param(
     [Parameter(Mandatory)][string]$Scenario
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 Write-Host "正在設定沙盒測試情境：$Scenario..." -ForegroundColor Cyan
 
