@@ -2,6 +2,27 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# IMPORTANT: this file must stay pure ASCII.
+# It has no UTF-8 BOM, and Windows PowerShell 5.1 reads BOM-less files using the
+# ANSI code page. Any non-ASCII byte here is decoded wrongly and corrupts the
+# parse ("string is missing the terminator"). All Chinese user-facing text lives
+# in the dot-sourced modules, which are UTF-8 with BOM.
+#
+# The one-line install command itself (Invoke-RestMethod | Invoke-Expression) is
+# NOT subject to the script execution policy, because no *file* is executed.
+# But this loader downloads its dependencies to a temp folder and dot-sources
+# them -- that IS file execution, and Restricted (the Windows default) blocks it.
+#
+# Process scope affects only this PowerShell process: no administrator rights are
+# required, nothing persistent is changed, and it expires when the process exits.
+try {
+    Set-ExecutionPolicy Bypass -Scope Process -Force
+} catch {
+    Write-Warning "Could not set the execution policy for this process: $($_.Exception.Message)"
+    Write-Warning "If you next see 'running scripts is disabled on this system', run:"
+    Write-Warning "  Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"
+}
+
 # Parse parameters manually from $args to allow Invoke-Expression execution without syntax errors
 $Profile = 'full'
 $NonInteractive = $false

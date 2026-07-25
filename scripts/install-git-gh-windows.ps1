@@ -38,6 +38,34 @@ try {
 
 $CourseGitHubScopes = @('repo', 'read:org', 'workflow')
 
+function Invoke-NativeCommand {
+    <#
+        Windows PowerShell 5.1 會把原生程式（gh、git、curl、winget…）寫到 stderr 的
+        每一行包成 NativeCommandError。在 $ErrorActionPreference = 'Stop' 之下，
+        即使程式結束碼是 0，只要它印了任何一行 stderr，整個腳本就會當場中止 ——
+        畫面上會出現一大段紅字，而不是我們準備好的中文說明。
+
+        2>&1、2>$null、*> $null 三種寫法都會觸發，沒有「安全的重導向」。
+        因此凡是需要擷取或忽略原生程式輸出的地方，一律透過這個函式。
+    #>
+    param(
+        [Parameter(Mandatory)][scriptblock]$Command
+    )
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $global:LASTEXITCODE = 0
+        $text = (& $Command 2>&1 | Out-String)
+        [pscustomobject]@{
+            exit_code = $LASTEXITCODE
+            text = $text
+        }
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 function Invoke-InstallSupportRequest {
     param([hashtable]$Request)
 
@@ -61,8 +89,10 @@ function Get-InstallDiagnostics {
         [scriptblock]$CommandLookup = { param($name) $null -ne (Get-Command $name -ErrorAction SilentlyContinue) },
         [scriptblock]$RawNetworkProbe = {
             if ($null -eq (Get-Command 'curl.exe' -ErrorAction SilentlyContinue)) { return $false }
-            & curl.exe --head --silent --show-error --max-time 5 https://raw.githubusercontent.com *> $null
-            return ($LASTEXITCODE -eq 0)
+            $probe = Invoke-NativeCommand {
+                & curl.exe --head --silent --show-error --max-time 5 https://raw.githubusercontent.com
+            }
+            return ($probe.exit_code -eq 0)
         }
     )
 
@@ -76,12 +106,14 @@ function Get-InstallDiagnostics {
         gh_found = [bool](& $CommandLookup "gh")
         winget_available = [bool](& $CommandLookup "winget")
         github_auth_state = if ($Step -eq 'github_auth' -and (& $CommandLookup "gh")) {
-            & gh auth status --hostname github.com *> $null
-            if ($LASTEXITCODE -eq 0) { 'authenticated' } else { 'not_logged_in' }
+            $authProbe = Invoke-NativeCommand { & gh auth status --hostname github.com }
+            if ($authProbe.exit_code -eq 0) { 'authenticated' } else { 'not_logged_in' }
         } else { 'unknown' }
         credential_helper_state = if ($Step -eq 'credential_helper' -and (& $CommandLookup "git")) {
-            $configuredHelper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
-            if ($configuredHelper) { 'configured' } else { 'missing' }
+            $helperProbe = Invoke-NativeCommand {
+                & git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$'
+            }
+            if ($helperProbe.text.Trim()) { 'configured' } else { 'missing' }
         } else { 'unknown' }
         raw_github_network = if ($Step -eq 'network') {
             if (& $RawNetworkProbe) { 'ok' } else { 'blocked' }
@@ -499,8 +531,10 @@ function Test-GitHubLoginPrerequisite {
     param(
         [scriptblock]$NetworkProbe = {
             if ($null -eq (Get-Command 'curl.exe' -ErrorAction SilentlyContinue)) { return $true }
-            & curl.exe --head --silent --show-error --max-time 10 https://github.com *> $null
-            return ($LASTEXITCODE -eq 0)
+            $probe = Invoke-NativeCommand {
+                & curl.exe --head --silent --show-error --max-time 10 https://github.com
+            }
+            return ($probe.exit_code -eq 0)
         },
         [scriptblock]$BrowserProbe = { Test-DefaultBrowserAssociation }
     )
@@ -519,8 +553,7 @@ function Get-GitHubAuthState {
     param(
         [string[]]$RequiredScopes = @('repo', 'read:org', 'workflow'),
         [scriptblock]$StatusProvider = {
-            $text = (& gh auth status --hostname github.com 2>&1 | Out-String)
-            [pscustomobject]@{ exit_code = $LASTEXITCODE; text = $text }
+            Invoke-NativeCommand { & gh auth status --hostname github.com }
         }
     )
 
@@ -736,8 +769,10 @@ elseif ($finalAuthState.state -eq 'insufficient_scope') {
     Write-WarnZh "GitHub 授權範圍不足（缺少：$($finalAuthState.missing_scopes -join ', ')）"
     $failed = $true
 }
-$helper = git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$' 2>$null
-if (-not $helper) { Write-WarnZh "找不到 Git 憑證助手設定"; $failed = $true }
+$helper = (Invoke-NativeCommand {
+    & git config --global --get-regexp '^credential\..*\.helper$|^credential\.helper$'
+}).text
+if (-not $helper.Trim()) { Write-WarnZh "找不到 Git 憑證助手設定"; $failed = $true }
 if ($failed) {
     Stop-Zh "部分檢查未通過。" "重新執行本程式；若仍失敗，將畫面中的黃色訊息提供給講師。" 'credential_helper'
 }

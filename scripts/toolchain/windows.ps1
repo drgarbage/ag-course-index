@@ -197,9 +197,21 @@ function Get-WindowsDockerPrerequisites {
             [bool]$processor.VirtualizationFirmwareEnabled
         },
         [scriptblock]$WslProbe = {
-            $output = & wsl.exe --status 2>$null
-            if ($LASTEXITCODE -ne 0) { return $null }
-            [string]($output -join [Environment]::NewLine)
+            # wsl.exe 未安裝時會寫 stderr 並回傳非零碼。在 $ErrorActionPreference = 'Stop'
+            # 之下，2>$null／2>&1 都會被包成 NativeCommandError 而中止整個安裝流程，
+            # 所以必須在本地把偏好設定降級後再呼叫。
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $global:LASTEXITCODE = 0
+                $output = & wsl.exe --status 2>&1
+                if ($LASTEXITCODE -ne 0) { return $null }
+                [string]($output -join [Environment]::NewLine)
+            } catch {
+                return $null
+            } finally {
+                $ErrorActionPreference = $previousPreference
+            }
         }
     )
 

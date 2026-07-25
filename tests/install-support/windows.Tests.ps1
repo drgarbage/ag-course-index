@@ -556,6 +556,65 @@ Describe 'GitHub token scope detection' {
     }
 }
 
+Describe 'Native command stderr handling' {
+    # 回歸測試：學生實際遇到的當機。$ErrorActionPreference = 'Stop' 之下，
+    # 原生程式只要印出任何一行 stderr，PowerShell 5.1 就會包成 NativeCommandError
+    # 並中止整個腳本 —— 畫面出現大段紅字，而不是準備好的中文說明。
+    It 'does not crash when a native command writes to stderr and exits non-zero' {
+        $result = $null
+        $thrown = $null
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Stop'
+        try {
+            $result = Invoke-NativeCommand { & cmd.exe /c "echo boom 1>&2 & exit /b 1" }
+        } catch {
+            $thrown = $_
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+
+        $thrown | Should -BeNullOrEmpty
+        $result.exit_code | Should -Be 1
+        $result.text | Should -Match 'boom'
+    }
+
+    It 'reports a zero exit code even when the command wrote to stderr' {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Stop'
+        try {
+            $result = Invoke-NativeCommand { & cmd.exe /c "echo warning 1>&2 & exit /b 0" }
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+        $result.exit_code | Should -Be 0
+        $result.text | Should -Match 'warning'
+    }
+
+    It 'restores the caller ErrorActionPreference afterwards' {
+        $ErrorActionPreference = 'Stop'
+        Invoke-NativeCommand { & cmd.exe /c "exit /b 0" } | Out-Null
+        $ErrorActionPreference | Should -Be 'Stop'
+    }
+
+    It 'routes every native invocation through the helper, never a raw redirect' {
+        # 2>&1 / 2>$null / *> $null 三種寫法都會觸發 NativeCommandError，
+        # 所以腳本主體不得出現任何一種；唯一的例外是 helper 自己。
+        $lines = Get-Content $script:InstallerPath
+        $offenders = @()
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            if ($line -match '^\s*#' -or $line -match '三種寫法') { continue }
+            if ($line -match '2>&1|2>\$null|\*>\s*\$null') {
+                # helper 內部那一行是唯一允許的用法。
+                if ($line -notmatch '\& \$Command 2>&1 \| Out-String') {
+                    $offenders += "line $($i + 1): $line"
+                }
+            }
+        }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Network-loaded installer' {
     It 'does not crash resolving the pattern file when loaded without a script folder' {
         # 一行安裝指令會讓 $PSScriptRoot 為空，Join-Path 會擲出終止性錯誤。
