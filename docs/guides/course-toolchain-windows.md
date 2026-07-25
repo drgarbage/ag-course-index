@@ -10,7 +10,7 @@
 2. 複製以下完整指令並貼至 PowerShell 中，再按 **Enter** 執行：
 
 ```powershell
-Invoke-RestMethod -Uri https://raw.githubusercontent.com/drgarbage/ag-course-index/main/scripts/install-course-toolchain-windows.ps1 | Invoke-Expression
+Set-ExecutionPolicy Bypass -Scope Process -Force; Invoke-RestMethod -Uri https://raw.githubusercontent.com/drgarbage/ag-course-index/main/scripts/install-course-toolchain-windows.ps1 | Invoke-Expression
 ```
 
 3. 執行後將會開啟互動式選單：
