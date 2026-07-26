@@ -43,3 +43,6 @@ The Two 輕量雙人帳租五天四夜多少錢？
 → 取出 top 3 相關 chunks
 → 交給 Agent 參考並禮貌回覆
 ```
+
+# 其他連結
+* [Plan:Google Sheet](./course04.plan.googlesheet.md)
