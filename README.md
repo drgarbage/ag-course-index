@@ -29,14 +29,9 @@
   * [ag-course-chat-step02](https://github.com/drgarbage/ag-course-chat-step02)
 
 * [ag-course-web-agent-base](https://github.com/drgarbage/ag-course-web-agent-base) : 空白的 Web Agent 基底
-* ag-course-line-chatbot-base : 空白的 Line Agent 基底
-* ag-course-line-secretary : LINE AI 秘書
+* [ag-course-line-chatbot-base](https://github.com/drgarbage/ag-course-line-chatbot-base) : 空白的 Line Agent 基底
+* [ag-course-line-chatbot-assistant](https://github.com/drgarbage/ag-course-line-chatbot-assistant) : LINE 聊天機器人助理
 * ag-course-agent-app-hub : 可加載不同 App 的 Agent 基底
-* ag-course-camping-bare : 露營裝備租賃助理空白版
-* ag-course-camping-markdown : 露營裝備租賃助理 markdown 商品版
-* ag-course-camping-sheet : 露營裝備租賃助理 Google Sheet 版
-* ag-course-camping-tools-rag : 露營裝備租賃助理 RAG 版本
-* ag-course-camping-line-chatbot : 露營裝備租賃助理 Line 聊天機器人版
 * ag-course-web-report : 報表相關的通用基底
 * [ag-course-copilot](https://github.com/drgarbage/ag-course-copilot) : 即時助理
 
