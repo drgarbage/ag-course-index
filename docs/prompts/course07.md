@@ -2,6 +2,28 @@
 
 來源：`class07/slides/slide.md`。
 
+## 🛠️ 開發環境 Skill 安裝指引
+
+本單元實作建議安裝以下 Agent Skills，以協助 AI 自動化開發與防止常見 SDK 錯誤：
+
+* **gemini-agent-dev-support**: 防止常見 Gemini API 調用與金鑰洩漏錯誤。
+* **free-live-dev**: 自動化開發、憑證收集與預覽部署協同工具。
+
+在你的專案根目錄下，開啟終端機並執行以下指令完成安裝：
+
+```bash
+# 專案本地安裝 (推薦)
+npx skills add https://github.com/drgarbage/ag-course-index --skill gemini-agent-dev-support
+npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-dev
+
+# 或全域安裝 (套用至所有專案)
+npx skills add https://github.com/drgarbage/ag-course-index --skill gemini-agent-dev-support -g
+npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-dev -g
+```
+
+---
+
+
 ## 採購比價助手 RFP
 
 ```text
