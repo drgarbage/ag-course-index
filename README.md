@@ -30,7 +30,7 @@
 
 * [ag-course-web-agent-base](https://github.com/drgarbage/ag-course-web-agent-base) : 空白的 Web Agent 基底
 * [ag-course-line-chatbot-base](https://github.com/drgarbage/ag-course-line-chatbot-base) : 空白的 Line Agent 基底 ([LINE設定教學影片](https://youtu.be/-eqwH9rCN2M))
-* [ag-course-line-chatbot-assistant](https://github.com/drgarbage/ag-course-line-chatbot-assistant) : LINE 聊天機器人助理
+* [ag-course-line-chatbot-assistant](https://github.com/drgarbage/ag-course-line-chatbot-assistant) : LINE 聊天機器人助理 ([Google Auth 設定教學影片](https://youtu.be/Q8TtqBNCibo))
 * ag-course-agent-app-hub : 可加載不同 App 的 Agent 基底
 * ag-course-web-report : 報表相關的通用基底
 * [ag-course-copilot](https://github.com/drgarbage/ag-course-copilot) : 即時助理

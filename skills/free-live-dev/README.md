@@ -35,6 +35,11 @@ npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-de
 1. **[SKILL.md](SKILL.md)**：主協調器提示詞。定義後端基礎建設自動建立、憑證收集流程、Git Flow 流程決策、環境初始化登入引導、測試-修復自癒迴圈與 Vercel 預覽連結輪詢。
 2. **[references/react-firestore-rules.md](references/react-firestore-rules.md)**：開發規範手冊。專門指導 Agent 如何撰寫 React Context API、TailwindCSS 與進行 Firestore 安全存取，含 Firestore Emulator 的具體啟動與隔離設定。
 3. **[references/playwright-qa-rules.md](references/playwright-qa-rules.md)**：QA 自動化手冊。指導 Agent 如何在本地啟動 headless 測試，並在失敗時自我修復 (Self-healing)。
-4. **[resources/vercel-preview.yml](resources/vercel-preview.yml)**：CI/CD 範本。Agent 會主動將此範本複製至學員專案的 `.github/workflows/` 下，實現 GitHub Actions 與 Vercel 的自動化集成；Node 版本讀取專案的 `.nvmrc`，與本機開發環境保持一致。
+4. **[resources/vercel-preview.yml](resources/vercel-preview.yml)**：CI/CD 範本。Agent 會主動將此範本複製至學員專案的 `.github/workflows/` 下，實現 GitHub Actions 與 Vercel 的自動化集成；Node 版本讀取專案的 `.nvmrc`，與本機開發環境保持一致；有 `firebase.json` 的專案會自動裝 Java 並用 Firestore Emulator 包住測試指令，跟本機的 QA Loop 走同一套隔離規則。
 5. **[resources/credential-form.js](resources/credential-form.js)**：本機憑證收集表單。零額外依賴的 Node 腳本，只綁定 `127.0.0.1`，收到表單送出後直接寫入 `.env.local` 並自動關閉，過程中金鑰內容不會被印出或送出到本機以外的地方；重複送出同一個欄位會就地覆寫舊值，而不是悄悄忽略。
-6. **[resources/read-env-value.js](resources/read-env-value.js)**：安全讀值工具。從 `.env.local` 取出單一金鑰值並印到 stdout，過程完全不經過 shell（不用 `source`／不用字串展開），避免金鑰內容含有 shell 特殊字元時被誤當成指令執行。
+6. **[resources/read-env-value.js](resources/read-env-value.js)**：安全讀值工具。從 `.env.local` 取出單一金鑰值並印到 stdout，過程完全不經過 shell（不用 `source`／不用字串展開），避免金鑰內容含有 shell 特殊字元時被誤當成指令執行；也能還原手動貼上的多行原始 JSON。
+7. **[resources/resolve-preview-url.js](resources/resolve-preview-url.js)**：Vercel Preview 連結輪詢工具。用 Node 而非 bash 迴圈實作重試邏輯，不依賴 `seq`／`[ -n ]`／`sleep` 這類只有 POSIX shell 才有的語法，在 Windows 上即使 Agent 的 Bash 工具背後接的不是 Git Bash 也能正常運作。
+
+## 🪟 跨平台注意事項
+
+`SKILL.md` 裡凡是「重試迴圈」「檔案解析」「憑證處理」這類有實質邏輯的部分，都刻意寫成 `resources/` 底下的 Node script，而不是 bash 控制流程——這樣不管 Agent 的 Bash 工具在 Windows 上實際接的是 Git Bash、WSL 還是別的東西，行為都一致。剩下少數還是純 bash 片段的地方（例如單純的 CLI 呼叫、`|` pipe），本來就是任何 shell 都通的語法，不受影響。

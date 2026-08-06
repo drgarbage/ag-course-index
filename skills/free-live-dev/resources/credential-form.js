@@ -52,9 +52,17 @@ function escapeHtml(str) {
 function renderForm(fields) {
   const rows = fields.map((f, i) => {
     const inputId = `field_${i}`;
+    // `-webkit-text-security` masks a <textarea> the way type="password"
+    // masks an <input> (there's no native masked textarea). It's WebKit/
+    // Blink-only — Firefox will show a multiline secret in plaintext — so
+    // the show/hide toggle below is the real cross-browser control; the
+    // masking is a bonus for the common case, not a guarantee.
     const inputEl = f.multiline
-      ? `<textarea id="${inputId}" name="${escapeHtml(f.name)}" rows="4" required></textarea>`
+      ? `<textarea id="${inputId}" name="${escapeHtml(f.name)}" rows="4" required${f.secret ? ' class="masked"' : ''}></textarea>`
       : `<input id="${inputId}" name="${escapeHtml(f.name)}" type="${f.secret ? 'password' : 'text'}" autocomplete="off" required />`;
+    const toggleBtn = f.secret
+      ? `<button type="button" class="toggle-btn" data-target="${inputId}" aria-label="顯示/隱藏">👁 顯示</button>`
+      : '';
     const link = f.link
       ? `<a href="${escapeHtml(f.link)}" target="_blank" rel="noopener">前往取得 →</a>`
       : '';
@@ -63,6 +71,7 @@ function renderForm(fields) {
         <label for="${inputId}">${escapeHtml(f.label || f.name)}</label>
         ${f.help ? `<p class="help">${escapeHtml(f.help)} ${link}</p>` : ''}
         ${inputEl}
+        ${toggleBtn}
       </div>`;
   }).join('\n');
 
@@ -73,28 +82,97 @@ function renderForm(fields) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>設定金鑰</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 560px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; background: #fafafa; }
-  h1 { font-size: 1.3rem; }
-  p.intro { color: #555; line-height: 1.6; }
-  .field { margin-bottom: 22px; }
-  label { display: block; font-weight: 600; margin-bottom: 4px; }
-  .help { font-size: 0.85rem; color: #666; margin: 0 0 6px; }
-  .help a { color: #2563eb; text-decoration: none; }
-  input, textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; font-family: inherit; }
-  button { background: #2563eb; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 1rem; cursor: pointer; }
-  button:hover { background: #1d4ed8; }
-  #status { margin-top: 16px; font-weight: 600; }
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+    max-width: 560px;
+    margin: 48px auto;
+    padding: 0 20px 40px;
+    color: #1e2330;
+    background: #f6f7fb;
+    line-height: 1.5;
+  }
+  .card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 32px;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.04);
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 8px; }
+  p.intro { color: #5b6272; margin: 0 0 28px; font-size: 0.92rem; }
+  .field { margin-bottom: 24px; }
+  .field:last-of-type { margin-bottom: 28px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.95rem; }
+  .help { font-size: 0.82rem; color: #6b7280; margin: 0 0 8px; }
+  .help a { color: #4f46e5; text-decoration: none; font-weight: 500; }
+  .help a:hover { text-decoration: underline; }
+  input, textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    background: #fbfbfd;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  textarea.masked { -webkit-text-security: disc; }
+  input:focus, textarea:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    background: #fff;
+  }
+  .toggle-btn {
+    background: none;
+    border: none;
+    color: #4f46e5;
+    font-size: 0.82rem;
+    cursor: pointer;
+    padding: 6px 0 0;
+  }
+  .toggle-btn:hover { text-decoration: underline; }
+  button[type="submit"] {
+    width: 100%;
+    background: #4f46e5;
+    color: white;
+    border: none;
+    padding: 13px 24px;
+    border-radius: 9px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button[type="submit"]:hover { background: #4338ca; }
+  #status { margin-top: 14px; font-weight: 600; font-size: 0.9rem; text-align: center; }
 </style>
 </head>
 <body>
-  <h1>🔑 請填寫以下設定值</h1>
-  <p class="intro">這些內容只會存到你自己電腦上的設定檔，不會被上傳、不會出現在對話紀錄裡。填完送出後，這個視窗就可以關閉了。</p>
-  <form id="f">
-    ${rows}
-    <button type="submit">送出並繼續</button>
-  </form>
-  <div id="status"></div>
+  <div class="card">
+    <h1>🔑 請填寫以下設定值</h1>
+    <p class="intro">這些內容只會存到你自己電腦上的設定檔，不會被上傳、不會出現在對話紀錄裡。填完送出後，這個視窗就可以關閉了。</p>
+    <form id="f">
+      ${rows}
+      <button type="submit">送出並繼續</button>
+    </form>
+    <div id="status"></div>
+  </div>
   <script>
+    document.querySelectorAll('.toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const el = document.getElementById(btn.dataset.target);
+        const showing = btn.textContent.includes('隱藏');
+        if (el.tagName === 'TEXTAREA') {
+          el.classList.toggle('masked', showing);
+        } else {
+          el.type = showing ? 'password' : 'text';
+        }
+        btn.textContent = showing ? '👁 顯示' : '🙈 隱藏';
+      });
+    });
+
     document.getElementById('f').addEventListener('submit', async (e) => {
       e.preventDefault();
       const status = document.getElementById('status');
@@ -107,7 +185,7 @@ function renderForm(fields) {
           body: JSON.stringify(data),
         });
         if (res.ok) {
-          document.body.innerHTML = '<h1>✅ 已完成</h1><p>設定值已儲存，這個視窗可以關閉了，請回到對話視窗繼續。</p>';
+          document.querySelector('.card').innerHTML = '<h1>✅ 已完成</h1><p class="intro">設定值已儲存，這個視窗可以關閉了，請回到對話視窗繼續。</p>';
           setTimeout(() => window.close(), 1500);
         } else {
           status.textContent = '送出失敗，請重試一次。';
@@ -141,22 +219,39 @@ function appendToEnvFile(outPath, values) {
   const absPath = path.resolve(outPath);
   let existingLines = [];
   try {
-    existingLines = fs.readFileSync(absPath, 'utf8').split('\n');
+    // Strip a trailing \r at the split — a Windows-edited file (CRLF) would
+    // otherwise leave every line, including continuation lines, one \r longer
+    // than expected, which throws off boundary detection below.
+    existingLines = fs.readFileSync(absPath, 'utf8').split('\n').map((l) => l.replace(/\r$/, ''));
   } catch {
     existingLines = [];
   }
 
+  // A prior manual edit (the guided-template fallback path) may have left a
+  // raw, unquoted, multi-line value in the file (e.g. a pasted service
+  // account JSON block spanning several physical lines). When we overwrite
+  // that key we must remove ALL of its continuation lines too — replacing
+  // only the first line would leave orphaned JSON fragments behind and
+  // corrupt the file. A continuation block ends at the next `KEY=` line, a
+  // comment line, or a blank line.
+  const isBoundary = (l) => l.trim() === '' || /^\s*#/.test(l) || /^[A-Z0-9_]+=/.test(l);
+
   const newEntries = new Map(Object.entries(values));
-  const updatedLines = existingLines.map((line) => {
+  const updatedLines = [];
+  for (let i = 0; i < existingLines.length; i++) {
+    const line = existingLines[i];
     const m = line.match(/^([A-Z0-9_]+)=/);
     if (m && newEntries.has(m[1])) {
       const key = m[1];
-      const rendered = `${key}=${JSON.stringify(newEntries.get(key))}`;
+      updatedLines.push(`${key}=${JSON.stringify(newEntries.get(key))}`);
       newEntries.delete(key); // consumed — an in-place update, not an append
-      return rendered;
+      while (i + 1 < existingLines.length && !isBoundary(existingLines[i + 1])) {
+        i++; // skip this key's old continuation lines
+      }
+      continue;
     }
-    return line;
-  });
+    updatedLines.push(line);
+  }
 
   const appendedLines = Array.from(newEntries.entries())
     .map(([k, v]) => `${k}=${JSON.stringify(v)}`);
