@@ -46,6 +46,7 @@
 * [用 Skill 與 MCP 讓 Antigravity 寫出更新的 Gemini API 程式](docs/guides/gemini-api-skill-and-mcp.md)
 * [API KEY 額度不足問題](docs/guides/gemini-api-troubleshooting.md)
 * Gemini／AI Agent 課程範例自檢提示詞：[中文版](docs/prompts/gemini-api-fix.md) | [English](docs/prompts/gemini-api-fix-en.md)
+* AI Agent 基礎提示詞：[通用版](docs/prompts/agent-base-universal.md) | [Gemini 專用版](docs/prompts/agent-base-gemini.md)
 
 ## 安裝指引
 * [Google 帳號註冊指引](docs/guides/google-account.md)
