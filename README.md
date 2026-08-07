@@ -1,13 +1,16 @@
 # Gemini 課程範例
+
 本專案存放 Gemini 實戰課程相關範例連結
 
 ### 前往 [課程投影畫面](https://gemini.printii.com/live-board#/live-board)
+
 > ⚠️ **輔助工具安裝** 若出現警示，請依以下方式開啟：
+>
 > * **Windows**：點選 **其他資訊** 並選擇 **仍要執行**。
 > * **macOS**：點選右鍵選擇 **打開**，或至 **系統設定 > 隱私權與安全性** 點選 **仍要開啟**。
 
-
 ## 課程簡報
+
 * [01 - AI Agent與Gemini](https://drive.google.com/file/d/1tj3D4CABs7zXA292MLywNsZUf2JphaPF/view?usp=drive_link) | [提示詞範例](./docs/prompts/course01.md)
 * [02 - 利用Antigravity製作第一個AI助理](https://drive.google.com/file/d/1xLdbsKc430BSsqyRZ5gGVJLK0M4LSe4U/view?usp=drive_link) | [提示詞範例](./docs/prompts/course02.md)
 * [03 - 進階提示詞工程與RAG概念](https://drive.google.com/file/d/1I037j_WSKnPLpySRyICQnSLY-JugSjZY/view?usp=drive_link) | [提示詞範例](./docs/prompts/course03.md)
@@ -22,12 +25,13 @@
 * [12 - 深入探討](https://drive.google.com/file/d/1PR-eD4Ew6TyvvjOj-QUZEDTFDTKL1oSI/view?usp=drive_link) | [提示詞範例](./docs/prompts/course12.md)
 
 ## 課程範例
+
 * [ag-course-index](https://github.com/drgarbage/ag-course-index) : 課程程式索引
 * **ag-course-chat** : 手寫範例
+
   * [ag-course-chat-step00](https://github.com/drgarbage/ag-course-chat-step00)
   * [ag-course-chat-step01](https://github.com/drgarbage/ag-course-chat-step01)
   * [ag-course-chat-step02](https://github.com/drgarbage/ag-course-chat-step02)
-
 * [ag-course-web-agent-base](https://github.com/drgarbage/ag-course-web-agent-base) : 空白的 Web Agent 基底
 * [ag-course-line-chatbot-base](https://github.com/drgarbage/ag-course-line-chatbot-base) : 空白的 Line Agent 基底 ([LINE設定教學影片](https://youtu.be/-eqwH9rCN2M))
 * [ag-course-line-chatbot-assistant](https://github.com/drgarbage/ag-course-line-chatbot-assistant) : LINE 聊天機器人助理 ([Google Auth 設定教學影片](https://youtu.be/Q8TtqBNCibo))
@@ -35,13 +39,13 @@
 * ag-course-web-report : 報表相關的通用基底
 * [ag-course-copilot](https://github.com/drgarbage/ag-course-copilot) : 即時助理
 
-
 ## 下載連結
-* Antigravity [Windows](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/windows-x64/Antigravity-x64.exe) | [macOS](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/darwin-arm/Antigravity.dmg)
-* Antigravity IDE [Windows](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/windows-x64/Antigravity%20IDE.exe) | [macOS](https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/darwin-arm/Antigravity%20IDE.dmg)
 
+* Antigravity [Windows](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/windows-x64/Antigravity-x64.exe) | [macOS](https://storage.googleapis.com/antigravity-public/antigravity-hub/2.3.1-5358163105546240/darwin-arm/Antigravity.dmg)
+* Antigravity IDE [Windows](<https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/windows-x64/Antigravity%20IDE.exe>) | [macOS](<https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.1.1-6123990880747520/darwin-arm/Antigravity%20IDE.dmg>)
 
 ## 其他資源
+
 * 下載 [範例資料庫](https://github.com/drgarbage/postgres-northwind)
 * 下載 [SEO 範例](resources/heartlink/)
 * [修正 Gemini 總是出現模型錯誤的問題](docs/guides/gemini-api-skill-and-mcp.md)
@@ -50,6 +54,7 @@
 * AI Agent 基礎提示詞：[通用版](docs/prompts/agent-base-universal.md) | [Gemini 專用版](docs/prompts/agent-base-gemini.md)
 
 ## 安裝指引
+
 * [Google 帳號註冊指引](docs/guides/google-account.md)
 * [Antigravity 2.0 與 Antigravity IDE 安裝指引](docs/guides/antigravity.md)
 * [GitHub 帳號註冊指引](docs/guides/github-account.md)
@@ -58,3 +63,15 @@
   * [macOS：課程環境與中文化整合安裝 (推薦)](docs/guides/course-toolchain-macos.md)
   * [Git 與 GitHub CLI 安裝說明與平台選擇 (通用)](docs/guides/git-and-gh.md)
 * [Visual Studio Code 安裝指引](docs/guides/visual-studio-code.md)
+
+## Agent 輔助技能
+
+| 技能名稱                                                      | 說明描述             |
+| :------------------------------------------------------------ | :------------------- |
+| [ai-agent-ui-support](./skills/ai-agent-ui-support/)           | 網頁 AI 助理        |
+| [free-live-dev](./skills/free-live-dev/)                       | 簡易網頁開發環境     |
+| [gemini-agent-dev-support](./skills/gemini-agent-dev-support/) | Gemini API 問題修正  |
+| [line-command-designer](./skills/line-command-designer/)       | LINE 選單與互動設計  |
+| [line-interact-planner](./skills/line-interact-planner/)       | LINE 對話 Token 優化 |
+| [line-memory](./skills/line-memory/)                           | LINE 對話記憶        |
+| [line-ui-designer](./skills/line-ui-designer/)                 | LINE 視覺呈現優化    |
