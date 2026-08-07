@@ -169,6 +169,14 @@ install_all_tools() {
     *) install_macos_tool node_lts yes ;;
   esac
   
+  if command -v npx >/dev/null 2>&1; then
+    printf '\n\033[36m▶ 安裝 Google 官方 Gemini Skills...\033[0m\n'
+    npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
+    npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
+    npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
+    printf '  \033[32m✓ Gemini Skills 安裝完成。\033[0m\n'
+  fi
+  
   # 3. cloudflared
   printf '\n\033[36m▶ 檢查並安裝 Cloudflared...\033[0m\n'
   local cf_state

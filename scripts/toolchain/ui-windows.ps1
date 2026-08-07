@@ -1,4 +1,4 @@
-﻿# Windows Course Toolchain Installer UI Module
+# Windows Course Toolchain Installer UI Module
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -193,6 +193,19 @@ function Install-AllTools {
         Invoke-WindowsToolInstall -ToolId 'node_lts' -Confirmed:$true | Out-Null
     } else {
         Write-Host "  ✓ NodeJS 已就緒" -ForegroundColor Green
+    }
+    
+    Refresh-WindowsProcessPath
+    if (Get-Command 'npx' -ErrorAction SilentlyContinue) {
+        Write-Host "`n▶ 安裝 Google 官方 Gemini Skills..." -ForegroundColor Cyan
+        try {
+            & npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
+            & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
+            & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
+            Write-Host "  ✓ Gemini Skills 安裝完成。" -ForegroundColor Green
+        } catch {
+            Write-Warning "Gemini Skills 安裝失敗：$($_.Exception.Message)"
+        }
     }
     
     Write-Host "`n▶ 檢查並安裝 Cloudflared..." -ForegroundColor Cyan

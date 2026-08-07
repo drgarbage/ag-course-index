@@ -1,50 +1,31 @@
-# 用 Skill 與 MCP 讓 Antigravity 寫出更新的 Gemini API 程式
+# 修正 Gemini 總是出現模型錯誤的問題
 
-AI 程式助理熟悉許多常見寫法，但它的既有知識不一定包含最新的 Gemini 模型、SDK 與 API 變更。這個專案因此同時加入一個精簡的 Gemini API skill，以及 Google 提供的 Gemini Docs MCP：skill 告訴助理「應該怎麼做」，MCP 則讓它在動手前查到最新官方文件。
+AI 程式助理在編寫 Gemini API 時，經常因為使用了已淘汰的舊版模型（例如 `gemini-2.0-*`）而遭遇 404 錯誤，或是因為不當組合內建工具（例如將 Google 搜尋與自訂 Tool 同時傳遞）而導致 API 報錯。
 
-## 專案已加入的設定
+透過在本機安裝 Google 官方的 Gemini Skills 並設定 Gemini Docs MCP 伺服器，可以讓助理在動手前自動比對並遵循 `gemini-agent-dev-support` 等開發規範，確保程式碼使用最新的模型與 SDK，避免錯誤寫法。
 
-```text
-.agents/
-├── mcp_config.json
-└── skills/
-    └── gemini-api-dev/
-        └── SKILL.md
-```
+## 安裝與設定步驟
 
-- [`.agents/skills/gemini-api-dev/SKILL.md`](../../.agents/skills/gemini-api-dev/SKILL.md) 是精簡版 skill。當工作涉及 Gemini API、函式呼叫、多模態或結構化輸出時，它會要求代理先查官方文件，採用目前的 Google Gen AI SDK，並避免把 API key 寫進程式碼。
-- [`.agents/mcp_config.json`](../../.agents/mcp_config.json) 將 Antigravity 連到 Google 公開代管的 Gemini Docs MCP。這個遠端服務不需要在本機安裝套件，也不需要 API key。
+### 步驟一：安裝 Google 官方 Gemini Skills
 
-這些都是專案層級設定：clone 或下載本專案後，以 Antigravity 開啟專案根目錄即可使用，不會影響其他專案。
-
-## 啟用與確認
-
-1. 使用 Antigravity 開啟本專案，若原本已開啟，請重新載入視窗或重新啟動，讓它重新索引 skill。
-2. 在代理面板右上角的選單開啟 **MCP Servers**；或到 **Settings → Customizations → Installed MCP Servers**。
-3. 重新整理後，確認 `gemini-api-docs` 顯示為已連線。
-4. 輸入 `/skills list`，或到 **Customizations → Rules**，確認 `gemini-api-dev` 已被發現。
-
-可以用這段提示測試：
-
-> 請先查詢 Gemini 官方文件，再用目前的 Python SDK 示範 Gemini API 的脈絡快取功能，並說明你使用的 MCP 工具與 skill。
-
-設定成功時，代理應先呼叫文件搜尋工具，再根據搜尋結果回答；不要只以「回答看起來合理」作為 MCP 已連線的證明。
-
-## 為什麼不用把完整官方 skill 全部複製進來？
-
-完整的 `gemini-api-dev` skill 包含當下的模型清單、各語言範例與大量參考內容，很適合需要離線提示的環境。不過模型名稱與 API 會變動，課程版只保留穩定的工作原則，把即時細節交給 Docs MCP 查詢。這樣內容較短、較容易讀，也降低日後硬編碼資訊過期的風險。
-
-如果你的工作環境沒有網路，或希望直接安裝 Google 維護的完整版，可以在專案根目錄執行：
+請在終端機執行以下指令，將 Google 官方的 Gemini Skills 安裝至全域環境：
 
 ```bash
-npx skills add google-gemini/gemini-skills --skill gemini-api-dev
+npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
+npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
+npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
 ```
 
-若安裝工具把 skill 放到別的位置，請確認最後位於本專案的 `.agents/skills/`，或 Antigravity 的全域 skill 目錄 `~/.gemini/config/skills/`。專案版與全域版若同名且內容不同，建議只保留一份，避免規則衝突。
+> [!NOTE]
+> 使用 `--global` 參數會將 Skill 安裝至 Antigravity 的全域目錄中（例如 Windows 環境的 `C:\Users\<UserName>\.gemini\config\skills\`），讓所有專案皆能共享使用。
 
-## 手動加入其他專案
+---
 
-要讓另一個專案使用相同設定，可複製本專案的 `.agents/skills/gemini-api-dev/`，再把以下項目合併到該專案的 `.agents/mcp_config.json`：
+### 步驟二：設定 Gemini Docs MCP 伺服器
+
+將 Antigravity 連接到 Google 公開代管的 Gemini Docs MCP。此服務不需要在本機安裝額外套件，也不需要 API key。
+
+請編輯或建立全域設定檔 `~/.gemini/config/mcp_config.json`（若只想套用於單一專案，可於專案根目錄下建立 `.agents/mcp_config.json`），並加入以下內容：
 
 ```json
 {
@@ -56,20 +37,44 @@ npx skills add google-gemini/gemini-skills --skill gemini-api-dev
 }
 ```
 
-若目標檔案已有其他 `mcpServers`，只新增 `gemini-api-docs` 這一項，不要覆蓋原有設定。遠端 MCP 會收到代理送出的文件查詢內容，因此不要在查詢中附上 API key、密碼、客戶資料或其他機密資訊。
+> [!IMPORTANT]
+> 如果設定檔中已有其他 `mcpServers`，請將 `gemini-api-docs` 新增至其列表中，不要直接覆蓋原有的其他設定。
+
+---
+
+### 步驟三：重啟與確認
+
+1. **重啟助理**：完全重新啟動 Antigravity 視窗或 IDE，使其重新讀取全域設定與 Skill。
+2. **確認 MCP 連線**：
+   - 在助理面板右上角的選單點選 **MCP Servers**，或進入 **Settings → Customizations → Installed MCP Servers**。
+   - 確認 `gemini-api-docs` 顯示為**已連線 (Connected)**。
+3. **確認 Skill 載入**：
+   - 在聊天輸入框輸入 `/skills list`，或進入 **Settings → Customizations → Rules**。
+   - 確認已載入 `gemini-api-dev`、`gemini-live-api-dev` 與 `gemini-interactions-api` 三個 Skill。
+
+---
+
+### 步驟四：功能測試
+
+您可以使用以下提示詞（Prompt）來測試設定是否生效：
+
+> 請先查詢 Gemini 官方文件，再用目前的 Python SDK 示範 Gemini API 的脈絡快取功能，並說明你使用的 MCP 工具與 skill。
+
+**測試成功指標**：代理在回答前應會先呼叫 `search_documentation` MCP 工具，並根據最新官方文件生成正確的程式碼與回覆。
+
+---
 
 ## 疑難排解
 
-- **找不到 skill**：完全重新啟動 Antigravity，並確認路徑與檔名是 `.agents/skills/gemini-api-dev/SKILL.md`。
-- **MCP 未連線**：確認網路可連到 `https://gemini-api-docs-mcp.dev`，且 JSON 沒有多餘逗號或被其他設定覆蓋。
-- **回答仍使用舊 SDK 或模型**：明確要求「先使用 Gemini Docs MCP 查詢」，並查看執行紀錄中是否真的呼叫 `search_documentation`（服務版本不同時可能顯示為 `search_docs`）。
-- **只想供自己所有專案使用**：skill 可移到 `~/.gemini/config/skills/`，MCP 可合併到 `~/.gemini/config/mcp_config.json`。
+- **找不到 Skill**：確認 Skill 已正確下載至全域目錄 `~/.gemini/config/skills/` 下，並完全重啟 Antigravity。
+- **MCP 未連線**：確認網路連線正常且能存取 `https://gemini-api-docs-mcp.dev`，並檢查 `mcp_config.json` 的 JSON 語法是否正確（如是否漏掉逗號或大括號）。
+- **回答仍使用舊版 SDK**：如果助理沒有主動呼叫，可在提示詞中明確指示：「請先使用 Gemini Docs MCP 查詢最新文件」。
 
 ## 參考資料
 
 - [Google：使用 Gemini MCP 和 Skills 設定程式設計助理](https://ai.google.dev/gemini-api/docs/coding-agents?hl=zh-tw)
 - [Antigravity：Agent Skills](https://antigravity.google/docs/skills)
 - [Antigravity：Model Context Protocol](https://antigravity.google/docs/mcp)
-- [Google 維護的 Gemini API skills](https://github.com/google-gemini/gemini-skills)
+- [Google 維護的 Gemini API skills 專案倉庫](https://github.com/google-gemini/gemini-skills)
 
 [返回 README](../../README.md)
