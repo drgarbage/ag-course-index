@@ -136,6 +136,79 @@ print("=" * 57)
 ' "$report"
 }
 
+set_macos_mcp_config() {
+  local appdata_dir="$HOME/Library/Application Support"
+  local mcp_key="gemini-api-docs"
+  local mcp_config='{"command":"uvx","args":["--from","git+https://github.com/philschmid/gemini-api-docs-mcp","gemini-docs-mcp"]}'
+
+  local paths=(
+    "$appdata_dir/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Code/User/globalStorage/roovim.rogue-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Cursor/User/globalStorage/roovim.rogue-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Antigravity/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Antigravity/User/globalStorage/roovim.rogue-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Antigravity IDE/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Antigravity IDE/User/globalStorage/roovim.rogue-dev/settings/cline_mcp_settings.json"
+    "$appdata_dir/Claude/claude_desktop_config.json"
+  )
+
+  for path in "${paths[@]}"; do
+    local app_folder=""
+    if [[ "$path" == *"Claude"* ]]; then
+      app_folder="$appdata_dir/Claude"
+    elif [[ "$path" == *"Code/User"* ]]; then
+      app_folder="$appdata_dir/Code"
+    elif [[ "$path" == *"Cursor/User"* ]]; then
+      app_folder="$appdata_dir/Cursor"
+    elif [[ "$path" == *"Antigravity IDE/User"* ]]; then
+      app_folder="$appdata_dir/Antigravity IDE"
+    elif [[ "$path" == *"Antigravity/User"* ]]; then
+      app_folder="$appdata_dir/Antigravity"
+    fi
+
+    if [ ! -d "$app_folder" ]; then
+      continue
+    fi
+
+    local dir
+    dir="$(dirname "$path")"
+    mkdir -p "$dir"
+
+    python3 - "$path" "$mcp_key" "$mcp_config" <<'PY'
+import json
+import sys
+import os
+
+path = sys.argv[1]
+mcp_key = sys.argv[2]
+mcp_val = json.loads(sys.argv[3])
+
+data = {"mcpServers": {}}
+if os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                data = json.loads(content)
+    except Exception:
+        pass
+
+if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
+    data["mcpServers"] = {}
+
+data["mcpServers"][mcp_key] = mcp_val
+
+try:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"  ✓ 已更新 MCP 設定：{path}")
+except Exception as e:
+    print(f"無法寫入 MCP 設定：{path} - {e}", file=sys.stderr)
+PY
+  done
+}
+
 install_git_gh() {
   printf '\n\033[36m▶ 正在啟動 Git 與 GitHub CLI 獨立安裝程序...\033[0m\n'
   local git_gh_script="$SCRIPT_DIR/install-git-gh-macos.command"
@@ -168,6 +241,16 @@ install_all_tools() {
     *'"status":"ready"'*) printf '  \033[32m✓ NodeJS 已就緒\033[0m\n' ;;
     *) install_macos_tool node_lts yes ;;
   esac
+  
+  printf '\n\033[36m▶ 檢查並安裝 uv...\033[0m\n'
+  if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+    printf '  \033[32m✓ uv 安裝/更新完成。\033[0m\n'
+  else
+    printf '  \033[33m! uv 安裝失敗。\033[0m\n'
+  fi
+  
+  printf '\n\033[36m▶ 設定 Gemini API Docs MCP...\033[0m\n'
+  set_macos_mcp_config
   
   if command -v npx >/dev/null 2>&1; then
     printf '\n\033[36m▶ 安裝 Google 官方 Gemini Skills...\033[0m\n'
@@ -222,7 +305,8 @@ install_custom() {
   printf ' 5) GUI 工具 (Antigravity IDE, VS Code, Browser)\n'
   printf ' 6) Antigravity 2.0 中文化\n'
   printf ' 7) Antigravity IDE 中文化 (設定教學)\n'
-  printf ' 8) VS Code 中文化 (設定教學)\n\n'
+  printf ' 8) VS Code 中文化 (設定教學)\n'
+  printf ' 9) uv 與 Gemini API Docs MCP\n\n'
   
   printf '請輸入編號: '
   read -r selection
@@ -283,6 +367,16 @@ install_custom() {
       8)
         printf '\n\033[36m▶ 檢查並執行 VS Code 中文化...\033[0m\n'
         install_macos_localization vscode yes
+        ;;
+      9)
+        printf '\n\033[36m▶ 檢查並安裝 uv...\033[0m\n'
+        if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+          printf '  \033[32m✓ uv 安裝/更新完成。\033[0m\n'
+        else
+          printf '  \033[33m! uv 安裝失敗。\033[0m\n'
+        fi
+        printf '\n\033[36m▶ 設定 Gemini API Docs MCP...\033[0m\n'
+        set_macos_mcp_config
         ;;
     esac
   done

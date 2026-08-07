@@ -64,7 +64,20 @@
   * [Git 與 GitHub CLI 安裝說明與平台選擇 (通用)](docs/guides/git-and-gh.md)
 * [Visual Studio Code 安裝指引](docs/guides/visual-studio-code.md)
 
-## Agent 輔助技能
+## Agent Skills
+
+### Antigravity 2.0 安裝提示詞
+
+這會強制裝到 ``User\.gemini\config\skills\`` 底下，因為正常裝法 2.0 會裝錯。
+
+```markdown
+將以下 skills 安裝到 %USERPROFILE%\.gemini\config\skills\
+google-gemini/gemini-skills --skill gemini-api-dev
+google-gemini/gemini-skills --skill gemini-live-api-dev
+google-gemini/gemini-skills --skill gemini-interactions-api
+```
+
+### 課程相關
 
 | 技能名稱                                                      | 說明描述             |
 | :------------------------------------------------------------ | :------------------- |

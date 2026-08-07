@@ -1,4 +1,4 @@
-# Windows Course Toolchain Installer UI Module
+﻿# Windows Course Toolchain Installer UI Module
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -181,6 +181,89 @@ function Install-GitGh {
     }
 }
 
+function Set-McpServerConfig {
+    $appData = $env:APPDATA
+    $paths = @(
+        (Join-Path $appData "Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Code\User\globalStorage\roovim.rogue-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Cursor\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Cursor\User\globalStorage\roovim.rogue-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Antigravity\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Antigravity\User\globalStorage\roovim.rogue-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Antigravity IDE\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Antigravity IDE\User\globalStorage\roovim.rogue-dev\settings\cline_mcp_settings.json"),
+        (Join-Path $appData "Claude\claude_desktop_config.json")
+    )
+
+    foreach ($path in $paths) {
+        $appFolder = ""
+        if ($path -match "Claude") {
+            $appFolder = Join-Path $appData "Claude"
+        } else {
+            if ($path -match "Code\\User") { $appFolder = Join-Path $appData "Code" }
+            elseif ($path -match "Cursor\\User") { $appFolder = Join-Path $appData "Cursor" }
+            elseif ($path -match "Antigravity IDE\\User") { $appFolder = Join-Path $appData "Antigravity IDE" }
+            elseif ($path -match "Antigravity\\User") { $appFolder = Join-Path $appData "Antigravity" }
+        }
+
+        if (-not (Test-Path $appFolder -PathType Container)) {
+            continue
+        }
+
+        $dir = Split-Path $path
+        if (-not (Test-Path $dir -PathType Container)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+
+        $jsonObj = $null
+        if (Test-Path $path -PathType Leaf) {
+            try {
+                $content = Get-Content -Raw -Path $path
+                if (-not [string]::IsNullOrWhiteSpace($content)) {
+                    $jsonObj = ConvertFrom-Json $content
+                }
+            } catch {
+                $jsonObj = $null
+            }
+        }
+
+        if ($null -eq $jsonObj) {
+            $jsonObj = [PSCustomObject]@{ mcpServers = [PSCustomObject]@{} }
+        }
+
+        if ($null -eq $jsonObj.mcpServers -or -not ($jsonObj.PSObject.Properties['mcpServers'])) {
+            $jsonObj | Add-Member -MemberType NoteProperty -Name 'mcpServers' -Value ([PSCustomObject]@{}) -Force
+        }
+
+        if ($jsonObj.mcpServers -is [System.Collections.IDictionary]) {
+            $jsonObj.mcpServers['gemini-api-docs'] = @{
+                command = "uvx"
+                args = @("--from", "git+https://github.com/philschmid/gemini-api-docs-mcp", "gemini-docs-mcp")
+            }
+        } else {
+            if (-not ($jsonObj.mcpServers.PSObject.Properties['gemini-api-docs'])) {
+                $jsonObj.mcpServers | Add-Member -MemberType NoteProperty -Name 'gemini-api-docs' -Value ([PSCustomObject]@{
+                    command = "uvx"
+                    args = @("--from", "git+https://github.com/philschmid/gemini-api-docs-mcp", "gemini-docs-mcp")
+                }) -Force
+            } else {
+                $jsonObj.mcpServers.'gemini-api-docs' = [PSCustomObject]@{
+                    command = "uvx"
+                    args = @("--from", "git+https://github.com/philschmid/gemini-api-docs-mcp", "gemini-docs-mcp")
+                }
+            }
+        }
+
+        try {
+            $newJsonContent = ConvertTo-Json $jsonObj -Depth 100
+            Set-Content -Path $path -Value $newJsonContent -Encoding utf8 -Force
+            Write-Host "  ✓ 已更新 MCP 設定：$path" -ForegroundColor Green
+        } catch {
+            Write-Warning "無法寫入 MCP 設定：$path - $($_.Exception.Message)"
+        }
+    }
+}
+
 function Install-AllTools {
     Write-Host "`n正在執行完整一鍵安裝 (全裝)..." -ForegroundColor Cyan
     
@@ -195,10 +278,26 @@ function Install-AllTools {
         Write-Host "  ✓ NodeJS 已就緒" -ForegroundColor Green
     }
     
+    Write-Host "`n▶ 檢查並安裝 uv..." -ForegroundColor Cyan
+    try {
+        powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+        Write-Host "  ✓ uv 安裝/更新完成。" -ForegroundColor Green
+    } catch {
+        Write-Warning "uv 安裝失敗：$($_.Exception.Message)"
+    }
+    
+    Write-Host "`n▶ 設定 Gemini API Docs MCP..." -ForegroundColor Cyan
+    Set-McpServerConfig
+    
     Refresh-WindowsProcessPath
     if (Get-Command 'npx' -ErrorAction SilentlyContinue) {
         Write-Host "`n▶ 安裝 Google 官方 Gemini Skills..." -ForegroundColor Cyan
         try {
+            # Local
+            & npx skills add google-gemini/gemini-skills --skill gemini-api-dev
+            & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev
+            & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api
+            # Global
             & npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
             & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
             & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
@@ -244,6 +343,7 @@ function Install-Custom {
     Write-Host " 6) Antigravity 2.0 中文化"
     Write-Host " 7) Antigravity IDE 中文化 (設定教學)"
     Write-Host " 8) VS Code 中文化 (設定教學)"
+    Write-Host " 9) uv、MCP 與 Gemini Skills 安裝"
     Write-Host ""
     
     $selection = Read-Host "請輸入編號"
@@ -252,7 +352,7 @@ function Install-Custom {
         return
     }
     
-    $parts = @($selection.Split(',; ') | Where-Object { $_ -match '^[1-8]$' })
+    $parts = @($selection.Split(',; ') | Where-Object { $_ -match '^[1-9]$' })
     if ($parts.Count -eq 0) {
         Write-Host "無效的選擇，返回選單。"
         return
@@ -317,6 +417,60 @@ function Install-Custom {
                     Write-Host "✓ VS Code 中文化完成。" -ForegroundColor Green
                 } elseif ($res.status -eq 'failed') {
                     Write-Host "✗ VS Code 中文化失敗：$($res.reason)" -ForegroundColor Red
+                }
+            }
+            "9" {
+                Write-Host "`n▶ 檢查並安裝 uv..." -ForegroundColor Cyan
+                try {
+                    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+                    Write-Host "  ✓ uv 安裝/更新完成。" -ForegroundColor Green
+                } catch {
+                    Write-Warning "uv 安裝失敗：$($_.Exception.Message)"
+                }
+                Write-Host "`n▶ 設定 Gemini API Docs MCP..." -ForegroundColor Cyan
+                Set-McpServerConfig
+                Write-Host "`n▶ 安裝 Google 官方 Gemini Skills..." -ForegroundColor Cyan
+                if (Get-Command 'npx' -ErrorAction SilentlyContinue) {
+                    try {
+                        # Local
+                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev
+                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev
+                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api
+                        # Global
+                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
+                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
+                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
+                        Write-Host "  ✓ Gemini Skills 安裝完成。" -ForegroundColor Green
+                    } catch {
+                        Write-Warning "Gemini Skills 安裝失敗：$($_.Exception.Message)"
+                    }
+                }
+            }
+            "9" {
+                Write-Host "`n▶ 檢查並安裝 uv..." -ForegroundColor Cyan
+                try {
+                    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+                    Write-Host "  ✓ uv 安裝/更新完成。" -ForegroundColor Green
+                } catch {
+                    Write-Warning "uv 安裝失敗：$($_.Exception.Message)"
+                }
+                Write-Host "`n▶ 設定 Gemini API Docs MCP..." -ForegroundColor Cyan
+                Set-McpServerConfig
+                Write-Host "`n▶ 安裝 Google 官方 Gemini Skills..." -ForegroundColor Cyan
+                if (Get-Command 'npx' -ErrorAction SilentlyContinue) {
+                    try {
+                        # Local
+                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev
+                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev
+                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api
+                        # Global
+                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
+                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
+                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
+                        Write-Host "  ✓ Gemini Skills 安裝完成。" -ForegroundColor Green
+                    } catch {
+                        Write-Warning "Gemini Skills 安裝失敗：$($_.Exception.Message)"
+                    }
                 }
             }
         }
