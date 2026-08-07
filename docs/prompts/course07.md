@@ -6,19 +6,24 @@
 
 本單元實作建議安裝以下 Agent Skills，以協助 AI 自動化開發與防止常見 SDK 錯誤：
 
-* **gemini-agent-dev-support**: 防止常見 Gemini API 調用與金鑰洩漏錯誤。
-* **free-live-dev**: 自動化開發、憑證收集與預覽部署協同工具。
+* **gemini-agent-dev-support**: 防止常見 Gemini API 調用與金鑰洩漏錯誤
+* **ai-agent-ui-support**: 規範 Agent 聊天介面
+* **live-dev-init**: 預檢與環境初始化
+* **live-dev-storage-init**: Firebase與Firestore資料庫配置 (若需要Firestore)
+* **live-dev-config**: GitHub與Vercel專案配置與憑證安全收集
+* **live-dev-deploy**: 本機自動測試、自癒與 Git Flow 部署發行
 
 在你的專案根目錄下，開啟終端機並執行以下指令完成安裝：
 
 ```bash
 # 專案本地安裝 (推薦)
-npx skills add https://github.com/drgarbage/ag-course-index --skill gemini-agent-dev-support
-npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-dev
-
-# 或全域安裝 (套用至所有專案)
-npx skills add https://github.com/drgarbage/ag-course-index --skill gemini-agent-dev-support -g
-npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-dev -g
+npx skills add drgarbage/ag-course-index --skill gemini-agent-dev-support
+npx skills add drgarbage/ag-course-index --skill ai-agent-ui-support
+npx skills add drgarbage/ag-course-index --skill live-dev-init
+npx skills add drgarbage/ag-course-index --skill live-dev-storage-init
+npx skills add drgarbage/ag-course-index --skill live-dev-config
+npx skills add drgarbage/ag-course-index --skill live-dev-deploy
+npx skills add affaan-m/ECC --skill frontend-design-direction
 ```
 
 ---
@@ -39,7 +44,7 @@ npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-de
 顯示近期報告列表，以文件卡片的形式呈現，並提供建立新報告的按鈕。
 
 ### Report Manager View
-列表所有已經儲存的報告，可以搜尋、列表、更名、刪除、開啟。
+列表所有已經儲存的報告，可以搜尋、列表、更名、刪除、開啟報告。
 
 ### Report View / Editor
 報告檢視畫面，提供不同版本的顯示切換介面，報告預覽模式，全螢幕預覽，以及編輯模式，在編輯模式下，使用者可以選取框選區塊，輸入提示詞要求AI局部修改。
@@ -49,70 +54,43 @@ npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-de
 
 ## 需求與目標對象
 提供公司採購人員便利的詢價、比價工具，完成以下目標:
+0. 使用者一開始需求一律在 Chat View 直接提出，用對話的方式說明比價目標。
 1. 確定採購商品規格，可為單項或多項同時評估。
 2. 協助制訂採購策略及方案。
-3. 提供至少三個以上候選方案供比較評估。
+3. 提供至少20個候選方案供比較評估。
 
 ## 使用環境
 用於採購人員初起選商、比價、提案階段，協助採購完成遴選及提案，以供權責主管做最終決策。
 
-## Domain Model & Data Schema
-
-* 商品
- - 分類
- - 供應商
- - 單價
- - 最低採購量
- - 到貨時程
- - 其他規格
- 
-* 採購單 (單通路)
- - 供應商
- - 商品清單
- - 採購條件
- - 優惠方案
- - 總預算
- - 運輸成本
- - 交期
- - 風險評估
-
-* 採購方案 (組合多通路及商品之綜合提案)
- - 總預算
- - 邊際成本
- - 交期
- - 風險評估
- - 方案內容: 採購單 組合，商品 組合
-
-## 外部系統
+## Agent Tool: googleSearch source priority
 * Google Search
-* Alibaba
-* 1688.com
-* Amazon
-* Taoboo
-* Shopee
+* B2B: Alibaba, 1688.com
+* B2C: Amazon, Taoboo, Shopee, PCHome, Momo, etc...
 * 其他大宗採購貨源，Agent 根據目的評估蒐尋對象
 
-## 評估流程
-1. 廣泛至多平台蒐集相關資訊
-2. 整理商品及廠商清單、價格、規格，規劃統一標準
-3. 分析與評估供應渠道可靠性、供貨風險評估
-4. 建立遴選標準，逐一比對廠商，並做出遴選通過與不通過評估
-5. 彙整情報，優先整理通過廠商排行，不通過廠商分為資格不符與超過預算兩類
-6. 從通過廠商中提出三套候選方案，並提供綜合比較建議
-7. 評估超過預算廠商是否有遺珠廠商，可另提備選方案
-8. 將分析結果製作成互動式報告
+## Agent Tool: identifySpec, collectData, 
+以下流程由 Agent 利用 Tooling 進行不同階段處理，最終彙整成 html5 格式報告。
+1. 廣泛至多平台蒐集相關資訊。
+2. 整理商品及廠商清單、價格、規格，規劃統一標準。
+3. 分析與評估供應渠道可靠性、供貨風險評估。
+4. 建立遴選標準，逐一比對廠商，並做出遴選通過與不通過評估。
+5. 彙整情報，優先整理通過廠商排行，不通過廠商分為資格不符與超過預算兩類，至少尋找 20 ~ 50 件商品。
+6. 從通過商品中提出三套為推薦方案，並提供綜合比較建議，剩餘非推薦方案也需要列出，並說明理由。
+7. 評估超過預算廠商是否有遺珠廠商，可另提備選方案。
+8. 將分析結果製作成互動式報告，產出報告應包含：
+	1. 規格對齊檢查
+	2. 價格與總成本估算
+	3. 供應商可信度評分
+	4. 前三名推薦與不推薦理由
+	5. 資料來源、查詢時間與限制聲明
 
-如果資料不足，請列出需要人工確認的問題，
-不要自行假裝已取得報價。
+> Agent Tooling 應將每個階段的搜尋結果暫存本地端記憶體，並嘗試分多次搜尋，當商品有多頁面時，應至少深入調查五個頁面，並在最後合併成單一數據包做整合。
+> 避免嘗試用一次的 token window 或 contenxt window 完成所有工作，而是定義完整專案結構，在調查過程持續補充資料，直到調查結束才彙整成最終報告。
+> 
+> 如果資料不足，請列出需要人工確認的問題，
+> 不要自行假裝已取得報價。
 
-## 產出報告應包含：
-1. 規格對齊檢查
-2. 價格與總成本估算
-3. 供應商可信度評分
-4. 前三名推薦與不推薦理由
-5. 資料來源、查詢時間與限制聲明
-
-## 報告格式
+## Agent Tool: generateHtmlReport
 報告內容不預先制定介面，而是以 html 沙盒形式呈現，讓 AI Agent 可以自由撰寫網頁內容，以達成以下目標:
 1. 應符合 RWD 訊息呈現格式
 2. 採用世界頂尖 UI/UX 設計標準，做排版設計
@@ -128,20 +106,24 @@ npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-de
 * 涉及廠商資訊時，應提供廠商連結，確保報告上可連到正確的廠商資訊。
 * 不可以平台的首頁當作連結
 
-## 列印格式
-報告應提供便於列印之格式，並可利用列印成PDF文件功能，下載為PDF文件
-
 ## Agent 服務準則
 1. 盡可能先問清楚需求、預算、時程、預期效果，待確定方向後，才開始搜尋資料。
 2. 執行工具過程，若無法一次完成資料彙整，仍須利用已取得之資料，整理成階段性報告。
 3. 應提供讓使用者得以合併各階段資料之機制，因此每次檢索結果，至少應在同一個 Session 中保存，以便 Agent 隨時調閱彙整。
 
+## 列印格式
+報告應提供便於列印之格式，並可利用列印成PDF文件功能，下載為PDF文件
+
 ### MSUT apply following Skills
 本案應利用以下 skill 協助用戶以正確的 gemini sdk 版本，搭配 Vercel 服務開發。
 開發過程由 Agent 全自動處理 git flow 版控、preview / production 佈署，直接透過公開網路驗證成果。
-npx skills add drgarbage/ag-course-index --skill gemini-agent-dev-support
-npx skills add drgarbage/ag-course-index --skill ai-agent-ui-support
-npx skills add drgarbage/ag-course-index --skill free-live-dev
+/gemini-agent-dev-support
+/ai-agent-ui-support
+/live-dev-init
+/live-dev-storage-init
+/live-dev-config
+/live-dev-deploy
+/frontend-design-direction
 ```
 
 ## 案例問題

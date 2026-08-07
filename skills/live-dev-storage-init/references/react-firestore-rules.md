@@ -35,7 +35,7 @@ function useApp() {
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 if (!getApps().length) {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-    throw new Error('FIREBASE_SERVICE_ACCOUNT is not set. Run local bootstrap form (free-live-dev Sec 2.2).');
+    throw new Error('FIREBASE_SERVICE_ACCOUNT is not set. Run local bootstrap form (live-dev-config Sec 2.2).');
   }
   initializeApp({ credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) });
 }
