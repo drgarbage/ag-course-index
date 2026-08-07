@@ -8,7 +8,10 @@
 
 * **gemini-agent-dev-support**: 防止常見 Gemini API 調用與金鑰洩漏錯誤
 * **ai-agent-ui-support**: 規範 Agent 聊天介面
-* **free-live-dev**: 簡化開發佈署工具
+* **live-dev-init**: 預檢與環境初始化
+* **live-dev-storage-init**: Firebase與Firestore資料庫配置 (若需要Firestore)
+* **live-dev-config**: GitHub與Vercel專案配置與憑證安全收集
+* **live-dev-deploy**: 本機自動測試、自癒與 Git Flow 部署發行
 
 在你的專案根目錄下，開啟終端機並執行以下指令完成安裝：
 
@@ -16,7 +19,10 @@
 # 專案本地安裝 (推薦)
 npx skills add drgarbage/ag-course-index --skill gemini-agent-dev-support
 npx skills add drgarbage/ag-course-index --skill ai-agent-ui-support
-npx skills add drgarbage/ag-course-index --skill free-live-dev
+npx skills add drgarbage/ag-course-index --skill live-dev-init
+npx skills add drgarbage/ag-course-index --skill live-dev-storage-init
+npx skills add drgarbage/ag-course-index --skill live-dev-config
+npx skills add drgarbage/ag-course-index --skill live-dev-deploy
 npx skills add affaan-m/ECC --skill frontend-design-direction
 ```
 
@@ -113,7 +119,10 @@ npx skills add affaan-m/ECC --skill frontend-design-direction
 開發過程由 Agent 全自動處理 git flow 版控、preview / production 佈署，直接透過公開網路驗證成果。
 /gemini-agent-dev-support
 /ai-agent-ui-support
-/free-live-dev
+/live-dev-init
+/live-dev-storage-init
+/live-dev-config
+/live-dev-deploy
 /frontend-design-direction
 ```
 
