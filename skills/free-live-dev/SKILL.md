@@ -107,6 +107,8 @@ Release prompt, verbatim: `"Would you like to release this to the production env
 - Merge conflict → stop and show the files. Self-resolve only generated artifacts (`package-lock.json`, build output); any hand-written source conflict goes to the user.
 - Deploy only via the Vercel GitHub integration. No local `vercel deploy` unless explicitly requested.
 - Broken production → `git revert` the merge commit on `main` → push → Vercel redeploys. Never force-push history. Log it.
+- Production deployments must not have Vercel Deployment Protection (such as password protection or Vercel Authentication) by default, ensuring public access.
+- If a production deployment is found to be not publicly accessible (e.g. requires login/password, redirects to login, or fails a public URL ping check), proactively ask the user: "The production deployment is not publicly accessible. Would you like to enable public access?" If they agree, guide them to the Vercel Project Dashboard (Settings -> Deployment Protection) to disable protection.
 
 ---
 
