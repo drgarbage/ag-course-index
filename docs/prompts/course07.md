@@ -125,11 +125,3 @@ npx skills add affaan-m/ECC --skill frontend-design-direction
 /live-dev-deploy
 /frontend-design-direction
 ```
-
-## 案例問題
-
-```text
-資料庫中最新的數據年份 19xx 實際上是 2026 年的數據。你是一位全球貿易專家，也是一家國際貿易公司經驗豐富的總經理，請分析 Northwind（北風貿易）的年度業績與庫存狀況，並提出你的洞察，以指出目前的瓶頸與弱點，並評估即將到來的 2027 年的機會。此外，請提供 SWOT 分析以及市場成長預估。
-
-作為我們的新任 CEO，請提供一份詳細的 10 頁報告，以說明你對過去狀況的檢視，以及下一季的新策略。
-```
