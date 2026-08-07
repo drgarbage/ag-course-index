@@ -19,11 +19,11 @@
 ### ⚡️ 快速一鍵安裝 (Recommended)
 在你的專案根目錄下，開啟終端機並執行以下指令，即可一鍵將 `free-live-dev` 協調器、開發規範參考手冊與 Actions 範本部署至專案中：
 ```bash
-npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-dev
+npx skills add drgarbage/ag-course-index --skill free-live-dev
 ```
 若你想全域安裝此規則（套用到所有專案的 Agent 中），只需加上 `-g` 參數：
 ```bash
-npx skills add https://github.com/drgarbage/ag-course-index --skill free-live-dev -g
+npx skills add drgarbage/ag-course-index --skill free-live-dev -g
 ```
 
 ---

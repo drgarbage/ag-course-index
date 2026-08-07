@@ -2,20 +2,22 @@
 name: ai-agent-ui-support
 description: Design and implementation guidance for adding a supporting AI Agent interface to a web application. Covers chat view design, responsive layout, message composer, attachments, speech-to-text, session management, long task planning, provider-agnostic adapters, tool execution security, and architecture.
 ---
-
 # AI Agent UI & Integration Support Skill
 
-This skill provides design, architectural, and implementation guidelines for embedding an AI Agent interface as a **supporting assistant** within an existing web application. 
+This skill provides design, architectural, and implementation guidelines for embedding an AI Agent interface as a **supporting assistant** within an existing web application.
 
 ## 1. Architectural & Integration Philosophy
 
 ### A. Non-Intrusive Integration
+
 - **Preserve the Host Application**: The Agent must not replace or disrupt the primary application workflows, navigation, or layout. It acts as a sidekick or overlay.
 - **Technology Alignment**: Reuse the host application's existing design system, component library, state management (e.g., Redux, Zustand, React Context, Pinia), and styling approach (Vanilla CSS, Tailwind, or CSS Modules). Do not inject heavy new frameworks or duplicate UI libraries unless absolutely necessary.
 - **Provider-Agnostic Core**: Keep the UI components and client-side controllers isolated from the specific model provider (Gemini, OpenAI, Anthropic, Ollama, etc.) via an abstraction or Adapter layer.
 
 ### B. UI/UX Decision Framework: Conversation vs. Traditional UI
+
 Do not force everything into a chat message. Keep simple, predictable, or high-precision tasks inside standard UI forms, menus, and buttons.
+
 - **Use Conversational Interaction for**: Ambiguous queries, natural-language filtering, cross-page updates, multi-step coordination, data synthesis, and complex assistance.
 - **Use Traditional UI for**: Toggling simple filters, editing a single input field, single-click actions, and browsing highly visual lists.
 
@@ -33,39 +35,45 @@ graph TD
     B -- "< 768px (Mobile)" --> C[Mobile Mode]
     B -- "768px - 1024px (Tablet / Desktop Compact)" --> D[Compact Float Window]
     B -- "> 1024px (Desktop Wide)" --> E[Wide Docked Panel]
-    
+  
     C --> C1[Full-Screen Panel / Slide-up Overlay]
     D --> D1[Floating Chat Bubble Overlay]
     E --> E1[Docked Right Side Panel / Reflows App Width]
 ```
 
 #### 1. Closed State (All Screens)
+
 - Render an **Agent Floating Action Button (FAB)** at the bottom-right corner.
 - Include hover, focus, active states, and an accessible label (`aria-label="Open AI Assistant"`).
 - Optionally show a small unread notification dot or a completed-task indicator badge.
 
 #### 2. Desktop — Compact Width (< 1024px)
+
 - Render the Agent as a **floating chat window** that overlays application content in the bottom-right.
 - Do not block critical global controls.
 - Support resizing or size switching (e.g., Compact vs. Large).
 - Provide a clear Close (`X`) button to return to the FAB.
 
 #### 3. Desktop — Wide Width (>= 1024px)
+
 - Allow docking the Agent as a **full-height right-side panel**.
 - **Crucial**: The main application content must reflow to use the remaining width. Do not cover or hide application content underneath the docked panel.
 - Do not reserve layout space when the Agent is closed. Reflow back to full width.
 
 #### 4. Mobile Layout
+
 - Render the opened Agent as a **full-screen or near-full-screen view** (e.g., drawer or modal sliding from the bottom/right).
 - Respect **safe-area insets** (`env(safe-area-inset-bottom)`).
 - Handle mobile keyboard display smoothly without hiding the input field or blocking content.
 - Ensure large, touch-friendly touch targets (minimum `44px x 44px`).
 
 ### B. Scrolling & Readability
+
 - **Auto-scroll to bottom** on new messages **only** if the user is already near the bottom (e.g., within 100px).
 - **Preserve reading position** when the user has scrolled up to review history. Do not force-scroll them to the bottom when the Agent streams a response.
 
 ### C. Agent Window Header
+
 - **Top Toolbar Controls**: The top header bar of the Agent window must include:
   - Agent Title or current conversation context.
   - New Chat (to start a fresh session).
@@ -85,6 +93,7 @@ graph TD
 The input area sits at the bottom of the chat window: `[+] [Message Input] [MIC] [SEND]`.
 
 ### A. Composer Logic & IME Safety
+
 Ensure perfect multi-line auto-growing text area input. Keydown listeners must handle Chinese/Japanese/Korean Input Method Editors (IME) correctly to prevent premature sending.
 
 > Code samples in this skill (here and in §8) are illustrative pseudocode showing the required behavior, not a library to import verbatim. Port the underlying logic (IME guard, capability shape) to the host app's actual framework and state layer (React/Vue/Svelte, Redux/Zustand/Pinia/Context, etc.).
@@ -107,7 +116,7 @@ inputElement.addEventListener('keydown', (e) => {
     if (isComposing || e.isComposing || e.keyCode === 229) {
       return;
     }
-    
+  
     // Send message on Enter, allow line breaks on Shift+Enter
     if (!e.shiftKey) {
       e.preventDefault();
@@ -123,17 +132,21 @@ inputElement.addEventListener('keydown', (e) => {
 - **Disabled State**: Disable the Send button and text inputs when the Agent is in a loading/generating state, or if the input is empty and has no attachments.
 
 ### B. Attachments & Multimodal Input (`[+]` Button)
+
 - Clicking `[+]` opens an attachment popover, menu, or sheet with options: *Upload File*, *Upload Photo*, or *Camera Capture*.
 - **Attachment List**: Show previews of selected files, including file name, size, type, and image thumbnails. Provide a `[x]` button to remove individual attachments before sending.
 - **Validation**: Enforce limits on file count, maximum file size, and supported file types (e.g., TXT, PDF, CSV, XLSX, PNG, JPG).
 - **Dynamic Supported Formats**: Determine supported files dynamically based on the current model provider capability adapter.
 
 ### C. Camera & Photo Capture
+
 - Provide direct camera access on mobile devices using `capture` or media devices APIs where supported.
 - Handle permission rejections gracefully by displaying a fallback notice and directing the user to use standard file selection instead.
 
 ### D. Speech-to-Text (STT) Input Flow (`[MIC]` Button)
+
 This is for transcribing audio to text within the composer, not for real-time streaming voice dialog.
+
 1. **Toggle Press**: Click mic button to start recording.
 2. **Persistence**: Recording continues until the user explicitly clicks a "Stop" button. Do not auto-stop on brief silences.
 3. **Indicator**: Show an active recording animation, elapsed time, and a "Cancel" action.
@@ -160,10 +173,12 @@ The Agent UI must offer session controls (history list, new chat, rename, delete
 For complex requests (e.g., running multiple database queries, processing files, consolidating multiple reports), the Agent should enter a "Long Task Plan" mode.
 
 ### A. Dividing into Subtasks
+
 - Show a structured list of subtasks with clear statuses: `Pending`, `Running`, `Completed`, `Failed`, or `Cancelled`.
 - Each subtask must be executed in a bounded, isolated frame. A single subtask failure should not crash the entire workflow if subsequent or independent tasks can proceed.
 
 ### B. Task Management Panel
+
 - Render an expandable/collapsible panel at the top of the Chat View or adjacent to it.
 - **Collapsed View**: Show a compact status (e.g., "Running task 2 of 5: Generating inventory charts...") and a small progress bar.
 - **Expanded View**: Show the detailed task list, elapsed time, failure messages, and a "Cancel Plan" button if cancellation is supported safely.
@@ -199,6 +214,7 @@ Keep a real-time, non-intrusive activity status area at the bottom of the messag
 ## 7. Dynamic Settings Panel
 
 Expose configuration parameters to help developers and power users adjust the Agent.
+
 - **Credentials & API Keys**: Keep keys secure. Never expose API keys in client-side code in production. Retrieve keys from a server-side configuration or proxy.
 - **Dynamic Capabilities**: Query the backend/provider dynamically to list available models, max tokens, temperature limits, and active tools. Update settings controls instantly when the model or provider switches.
 - **Local Control**: Provide clear buttons to `Clear Current Session`, `Clear All Sessions`, and `Reset Local Agent Settings`.
@@ -253,6 +269,7 @@ The Agent must receive relevant runtime context from the active application to p
 When analyzing the host application, map out existing APIs and actions that the Agent can invoke.
 
 ### A. Tool Design Guidelines
+
 - **Naming**: Use verbs starting with camelCase: `searchProducts`, `getOrderDetails`, `createTask`, `updateInvoiceStatus`, `navigateToPage`.
 - **Description**: Provide clear, descriptive docstrings detailing exactly what the tool does and when the model should trigger it.
 - **Simulations Prohibited**: The Agent must never hallucinate tool outcomes. If a tool fails, return a structured error response:
@@ -269,7 +286,9 @@ When analyzing the host application, map out existing APIs and actions that the 
 - **Real-Time State Mirroring**: Executed tool outputs should immediately update the host application state (e.g., refreshing a datagrid or showing a success toast on the page) so that the user's screen reflects the action.
 
 ### B. Destructive & Critical Confirmation Flow
+
 Any tool that initiates irreversible, expensive, or destructive actions must prompt the user for confirmation via an interactive UI card before calling the backend.
+
 - **Actions requiring confirmation**: Deleting records, triggering payments/emails, batch edits, modifying credentials.
 - **Flow**:
   1. Agent decides to call `deleteInvoice(id)`.
@@ -283,13 +302,13 @@ Any tool that initiates irreversible, expensive, or destructive actions must pro
 
 Keep code modular. Follow this separation of concerns:
 
-| Layer | Responsibility |
-| --- | --- |
-| **Components** | Visual message list, bubbles, headers, composers, FAB, settings UI. |
+| Layer                         | Responsibility                                                                                           |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **Components**          | Visual message list, bubbles, headers, composers, FAB, settings UI.                                      |
 | **Hooks / Controllers** | Handles IME listeners, composer heights, state mappings, file selection handlers, audio stream triggers. |
-| **Provider Adapters** | Concrete implementations for Gemini API, OpenAI, Anthropic, mapping inputs/outputs to standard schemas. |
-| **Tool registry** | Registers available functions, validates inputs, and triggers host actions. |
-| **Repository Layer** | Saves, loads, and syncs history and user settings. |
+| **Provider Adapters**   | Concrete implementations for Gemini API, OpenAI, Anthropic, mapping inputs/outputs to standard schemas.  |
+| **Tool registry**       | Registers available functions, validates inputs, and triggers host actions.                              |
+| **Repository Layer**    | Saves, loads, and syncs history and user settings.                                                       |
 
 ---
 

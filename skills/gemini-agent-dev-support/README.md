@@ -14,11 +14,11 @@
 ### ⚡️ 快速一鍵安裝 (Recommended)
 在你的專案根目錄下，開啟終端機並執行以下指令，即可透過 `skills` CLI 一鍵將此 Skill 下載並配置到你專案的 `.agents/` 目錄中：
 ```bash
-npx skills add https://github.com/drgarbage/ag-course-index --skill gemini-agent-dev-support
+npx skills add drgarbage/ag-course-index --skill gemini-agent-dev-support
 ```
 若你想將此自檢規則進行**全域安裝**（讓所有專案的 Agent 都套用），只需加上 `-g` 參數：
 ```bash
-npx skills add https://github.com/drgarbage/ag-course-index --skill gemini-agent-dev-support -g
+npx skills add drgarbage/ag-course-index --skill gemini-agent-dev-support -g
 ```
 
 ---

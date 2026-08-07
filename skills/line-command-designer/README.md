@@ -16,11 +16,11 @@
 ### ⚡️ 快速一鍵安裝 (Recommended)
 在你的專案根目錄下，開啟終端機並執行以下指令：
 ```bash
-npx skills add https://github.com/drgarbage/ag-course-index --skill line-command-designer
+npx skills add drgarbage/ag-course-index --skill line-command-designer
 ```
 若你想全域安裝此規則（套用到所有專案的 Agent 中），只需加上 `-g` 參數：
 ```bash
-npx skills add https://github.com/drgarbage/ag-course-index --skill line-command-designer -g
+npx skills add drgarbage/ag-course-index --skill line-command-designer -g
 ```
 
 ---
