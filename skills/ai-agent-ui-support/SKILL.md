@@ -1,102 +1,262 @@
 ---
 name: ai-agent-ui-support
-description: Design and implementation guidance for adding a supporting AI Agent interface to a web application. Covers chat view design, responsive layout, message composer, attachments, speech-to-text, session management, long task planning, provider-agnostic adapters, tool execution security, and architecture.
+description: Design and integration guidance for adding a reusable AI Agent chat interface to an existing web application. Use when adding an embedded AI assistant, chat view, multimodal input, speech-to-text, session history, long-task execution UI, Agent activity states, provider/model settings, or Tool / Function Calling support. The Agent is a supporting interface for the existing application rather than the application's primary UI.
 ---
-# AI Agent UI & Integration Support Skill
 
-This skill provides design, architectural, and implementation guidelines for embedding an AI Agent interface as a **supporting assistant** within an existing web application.
+# AI Agent UI Support
 
-## 1. Architectural & Integration Philosophy
+Add a reusable AI Agent interface to an existing web application.
 
-### A. Non-Intrusive Integration
+The Agent should act as a supporting capability of the application. Preserve the application's existing navigation, layout, workflows, design system, state management, and business UI unless changes are required for Agent integration.
 
-- **Preserve the Host Application**: The Agent must not replace or disrupt the primary application workflows, navigation, or layout. It acts as a sidekick or overlay.
-- **Technology Alignment**: Reuse the host application's existing design system, component library, state management (e.g., Redux, Zustand, React Context, Pinia), and styling approach (Vanilla CSS, Tailwind, or CSS Modules). Do not inject heavy new frameworks or duplicate UI libraries unless absolutely necessary.
-- **Provider-Agnostic Core**: Keep the UI components and client-side controllers isolated from the specific model provider (Gemini, OpenAI, Anthropic, Ollama, etc.) via an abstraction or Adapter layer.
+The implementation should be provider-agnostic whenever practical. It may use Gemini, OpenAI, Anthropic, local models, or other Agent-capable APIs.
 
-### B. UI/UX Decision Framework: Conversation vs. Traditional UI
-
-Do not force everything into a chat message. Keep simple, predictable, or high-precision tasks inside standard UI forms, menus, and buttons.
-
-- **Use Conversational Interaction for**: Ambiguous queries, natural-language filtering, cross-page updates, multi-step coordination, data synthesis, and complex assistance.
-- **Use Traditional UI for**: Toggling simple filters, editing a single input field, single-click actions, and browsing highly visual lists.
+Provider-specific features should be exposed through capability detection rather than hard-coded assumptions.
 
 ---
 
-## 2. Agent Chat View & Responsive Layouts
+# 1. Attach an Agent Chat View to Web Application
 
-The Chat View must support standard message bubbles (User on the right, Agent on the left), markdown rendering (using safe renderers + sanitization), quick replies, tool execution indicators, and robust scrolling.
+The Agent Chat View must provide:
 
-### A. Responsive Layout States
+1. Chat View
+2. Text Input
+3. User / Agent Message Bubble
+4. Markdown display support
+5. Quick Reply / Follow-up Actions
+6. Agent Loading state
+7. Agent Activity state
+8. Session Management
+9. Long Task support
+10. Task Management Panel
+11. Multiple file input
+12. Photo and camera input
+13. Speech-to-text input
+14. Tool / Function Calling activity display
+15. RWD support
 
-```mermaid
-graph TD
-    A[Screen Size / Trigger] --> B{Screen Width}
-    B -- "< 768px (Mobile)" --> C[Mobile Mode]
-    B -- "768px - 1024px (Tablet / Desktop Compact)" --> D[Compact Float Window]
-    B -- "> 1024px (Desktop Wide)" --> E[Wide Docked Panel]
-  
-    C --> C1[Full-Screen Panel / Slide-up Overlay]
-    D --> D1[Floating Chat Bubble Overlay]
-    E --> E1[Docked Right Side Panel / Reflows App Width]
+The Chat View must be implemented as a reusable feature that can be integrated into different web applications without requiring the application itself to become Agent-centric.
+
+---
+
+# 2. Message View
+
+Use Message Bubbles for conversation.
+
+```text
+Agent Bubble                        
+
+                         User Bubble
 ```
 
-#### 1. Closed State (All Screens)
+Requirements:
 
-- Render an **Agent Floating Action Button (FAB)** at the bottom-right corner.
-- Include hover, focus, active states, and an accessible label (`aria-label="Open AI Assistant"`).
-- Optionally show a small unread notification dot or a completed-task indicator badge.
+* User Bubble aligns right.
+* Agent Bubble aligns left.
+* Agent Bubble supports Markdown.
+* Long responses remain readable.
+* Code blocks render correctly.
+* Tables support responsive display or horizontal scrolling.
+* Links are clickable.
+* Errors are clearly distinguishable from normal Agent responses.
+* Tool execution results may be rendered as structured content.
+* Attachments sent by the user should remain visible with the corresponding message.
 
-#### 2. Desktop — Compact Width (< 1024px)
+Markdown should support at least:
 
-- Render the Agent as a **floating chat window** that overlays application content in the bottom-right.
-- Do not block critical global controls.
-- Support resizing or size switching (e.g., Compact vs. Large).
-- Provide a clear Close (`X`) button to return to the FAB.
+* Heading
+* Bold
+* Italic
+* Ordered list
+* Unordered list
+* Inline code
+* Code block
+* Table
+* Quote
+* Divider
+* Link
 
-#### 3. Desktop — Wide Width (>= 1024px)
+When the Agent has predefined possible next actions, display Quick Reply / Follow-up Buttons below the Agent message.
 
-- Allow docking the Agent as a **full-height right-side panel**.
-- **Crucial**: The main application content must reflow to use the remaining width. Do not cover or hide application content underneath the docked panel.
-- Do not reserve layout space when the Agent is closed. Reflow back to full width.
+Examples:
 
-#### 4. Mobile Layout
+```text
+[Continue]
+[View Details]
+[Generate Report]
+[Open Record]
+[Retry]
+```
 
-- Render the opened Agent as a **full-screen or near-full-screen view** (e.g., drawer or modal sliding from the bottom/right).
-- Respect **safe-area insets** (`env(safe-area-inset-bottom)`).
-- Handle mobile keyboard display smoothly without hiding the input field or blocking content.
-- Ensure large, touch-friendly touch targets (minimum `44px x 44px`).
-
-### B. Scrolling & Readability
-
-- **Auto-scroll to bottom** on new messages **only** if the user is already near the bottom (e.g., within 100px).
-- **Preserve reading position** when the user has scrolled up to review history. Do not force-scroll them to the bottom when the Agent streams a response.
-
-### C. Agent Window Header
-
-- **Top Toolbar Controls**: The top header bar of the Agent window must include:
-  - Agent Title or current conversation context.
-  - New Chat (to start a fresh session).
-  - Session History (to view/load past sessions).
-  - Settings (to adjust provider/model parameters).
-  - Resize/Dock Toggle (to switch between compact floating and wide docked modes).
-  - Close button.
-- **Overflow & Space Conservation**:
-  - When horizontal space is restricted (e.g., on mobile or very compact windows), group lower-priority header actions (such as Settings, History, or Docking controls) into an overflow dropdown/menu button.
-  - Do not crowd the toolbar with too many icon-only buttons.
-  - Use clear text labels, tooltips, or accessible names (`aria-label`) so screen readers can describe the buttons correctly.
+Quick Replies must correspond to actions that can actually be executed.
 
 ---
 
-## 3. Message Composer & Input Flows
+# 3. Chat Scrolling Behavior
 
-The input area sits at the bottom of the chat window: `[+] [Message Input] [MIC] [SEND]`.
+When new messages arrive:
 
-### A. Composer Logic & IME Safety
+* Automatically scroll to the newest message when the user is already near the bottom.
+* Do not force-scroll when the user is reading previous messages.
+* Preserve the user's current reading position when older messages or history are loaded.
+* Agent Activity changes follow the same rule.
 
-Ensure perfect multi-line auto-growing text area input. Keydown listeners must handle Chinese/Japanese/Korean Input Method Editors (IME) correctly to prevent premature sending.
+---
 
-> Code samples in this skill (here and in §8) are illustrative pseudocode showing the required behavior, not a library to import verbatim. Port the underlying logic (IME guard, capability shape) to the host app's actual framework and state layer (React/Vue/Svelte, Redux/Zustand/Pinia/Context, etc.).
+# 4. Multiple File Input
+
+Support multiple file inputs in one message.
+
+The Agent UI should support all file types accepted by the currently selected provider and model.
+
+Possible formats include:
+
+```text
+txt
+csv
+pdf
+xlsx
+docx
+ppt
+pptx
+json
+md
+and other provider-supported formats
+```
+
+Do not hard-code the supported format list as the source of truth.
+
+Actual support must be determined from:
+
+* Current Provider
+* Current Model
+* API capability
+* File size limitations
+* Attachment count limitations
+
+The UI must support:
+
+* Multiple file selection
+* Multiple files in one message
+* File name display
+* File type display
+* File size display when useful
+* Upload progress
+* Upload loading state
+* Remove individual attachment
+* Unsupported format error
+* File-too-large error
+* Upload failure and retry
+
+Attachments must be previewed before sending when practical.
+
+---
+
+# 5. Photo Input
+
+Support image input through:
+
+```text
+Upload Photo
+Capture with Camera
+```
+
+Support all image formats accepted by the selected provider/model, such as:
+
+```text
+jpg
+jpeg
+png
+webp
+and other supported image formats
+```
+
+Support:
+
+* Single image upload
+* Multiple image upload
+* Image preview
+* Remove image before sending
+* Camera capture
+* Camera permission handling
+* Upload failure
+* Unsupported format
+* Unsupported model capability
+
+Camera capture should only appear when the current browser/device supports it.
+
+---
+
+# 6. Speech-to-Text Input
+
+Speech-to-text is used as a method for entering text into the normal Chat Input.
+
+It is not automatically a real-time voice conversation.
+
+The required flow is:
+
+```text
+[MIC]
+  ↓
+Start Recording
+  ↓
+Recording...
+  ↓
+User manually stops recording
+  ↓
+Transcribing...
+  ↓
+Text inserted into Chat Input
+  ↓
+User reviews / edits
+  ↓
+[SEND]
+```
+
+Requirements:
+
+* Click `[MIC]` to start recording.
+* Recording must continue until the user explicitly stops it.
+* Do not automatically stop recording because of silence.
+* Click the microphone control again, or an explicit Stop control, to stop.
+* Show an obvious recording state.
+* Show recording elapsed time when practical.
+* After recording stops, show a transcription loading state.
+* Convert recorded audio into text.
+* Insert the result into the Chat Input.
+* Do not automatically send the transcribed result.
+* The user must be able to edit the transcription before sending.
+
+Handle:
+
+* Microphone permission denied
+* Recording cancelled
+* Unsupported browser
+* Unsupported provider/model
+* Transcription error
+* Retry
+
+Speech-to-text must not break normal text input behavior.
+
+---
+
+# 7. Text Input Behavior
+
+The text input must support:
+
+* Single-line input
+* Multi-line input
+* Automatic input height expansion when appropriate
+* `Enter` to send
+* `Shift + Enter` for newline
+* Chinese IME
+* Other composition-based IME input
+* Placeholder
+* Sending state
+* Error recovery
+* Text + attachments in the same message
+
+During IME composition, `Enter` must not accidentally send the message.
 
 ```javascript
 // Example: Composition & Keydown Handling
@@ -128,102 +288,939 @@ inputElement.addEventListener('keydown', (e) => {
 });
 ```
 
-- **Draft Recovery**: If sending fails, retain the user's text in the input box so they do not lose their draft.
-- **Disabled State**: Disable the Send button and text inputs when the Agent is in a loading/generating state, or if the input is empty and has no attachments.
-
-### B. Attachments & Multimodal Input (`[+]` Button)
-
-- Clicking `[+]` opens an attachment popover, menu, or sheet with options: *Upload File*, *Upload Photo*, or *Camera Capture*.
-- **Attachment List**: Show previews of selected files, including file name, size, type, and image thumbnails. Provide a `[x]` button to remove individual attachments before sending.
-- **Validation**: Enforce limits on file count, maximum file size, and supported file types (e.g., TXT, PDF, CSV, XLSX, PNG, JPG).
-- **Dynamic Supported Formats**: Determine supported files dynamically based on the current model provider capability adapter.
-
-### C. Camera & Photo Capture
-
-- Provide direct camera access on mobile devices using `capture` or media devices APIs where supported.
-- Handle permission rejections gracefully by displaying a fallback notice and directing the user to use standard file selection instead.
-
-### D. Speech-to-Text (STT) Input Flow (`[MIC]` Button)
-
-This is for transcribing audio to text within the composer, not for real-time streaming voice dialog.
-
-1. **Toggle Press**: Click mic button to start recording.
-2. **Persistence**: Recording continues until the user explicitly clicks a "Stop" button. Do not auto-stop on brief silences.
-3. **Indicator**: Show an active recording animation, elapsed time, and a "Cancel" action.
-4. **Transcription**: On stop, display a spinner/loading status while transcribing.
-5. **Review Draft**: Insert the transcribed text into the message input field. **Do not auto-send**. Allow the user to review, edit, or append to the text before sending.
-6. **Graceful Fallbacks**: If microphone permission is denied or STT API fails, display a user-friendly toast/alert and leave the original text draft untouched.
-
 ---
 
-## 4. Session Management
+# 8. Chat View RWD
 
-The Agent UI must offer session controls (history list, new chat, rename, delete) that hook into the host application's persistence mechanism.
+The Agent interface must support responsive web design.
 
-- **Persistence Layer**: Do not force `localStorage`. Match the host app's design:
-  - If the host app is a server-side authenticated app, store conversations in the backend database.
-  - If it's a client-only static tool, use `IndexedDB` or `localStorage`.
-- **Title Generation**: Automatically generate a session title after 1-2 turns using a lightweight model call or a substring extraction.
-- **Reopen Integrity**: When the user closes and opens the chat panel, keep the active session intact. Never reset the chat unless they click "New Chat" or it expires.
+The primary responsive modes are:
 
----
+```text
+Desktop Narrow
+Desktop Wide
+Mobile
+```
 
-## 5. Long Task Planning & Task Management
-
-For complex requests (e.g., running multiple database queries, processing files, consolidating multiple reports), the Agent should enter a "Long Task Plan" mode.
-
-### A. Dividing into Subtasks
-
-- Show a structured list of subtasks with clear statuses: `Pending`, `Running`, `Completed`, `Failed`, or `Cancelled`.
-- Each subtask must be executed in a bounded, isolated frame. A single subtask failure should not crash the entire workflow if subsequent or independent tasks can proceed.
-
-### B. Task Management Panel
-
-- Render an expandable/collapsible panel at the top of the Chat View or adjacent to it.
-- **Collapsed View**: Show a compact status (e.g., "Running task 2 of 5: Generating inventory charts...") and a small progress bar.
-- **Expanded View**: Show the detailed task list, elapsed time, failure messages, and a "Cancel Plan" button if cancellation is supported safely.
-
-```markdown
-┌──────────────────────────────────────────────┐
-│  Processing Inventory Report (2/4 Done)   [▼]│
-│  [██████████████░░░░░░░░░░░░░░░] 50%          │
-├──────────────────────────────────────────────┤
-│  [✓] Load store locations                    │
-│  [▶] Fetch inventory for 12 branches (30s)   │
-│  [ ] Compare pricing variances               │
-│  [ ] Generate Excel sheet                    │
-│                                  [Cancel]    │
-└──────────────────────────────────────────────┘
+```mermaid
+graph TD
+    A[Screen Size / Trigger] --> B{Screen Width}
+    B -- "< 768px (Mobile)" --> C[Mobile Mode]
+    B -- "768px - 1024px (Tablet / Desktop Compact)" --> D[Compact Float Window]
+    B -- "> 1024px (Desktop Wide)" --> E[Wide Docked Panel]
+  
+    C --> C1[Full-Screen Panel / Slide-up Overlay]
+    D --> D1[Floating Chat Bubble Overlay]
+    E --> E1[Docked Right Side Panel / Reflows App Width]
 ```
 
 ---
 
-## 6. Agent Activity Status & Tool Execution
+# 9. Desktop Narrow Layout
 
-Keep a real-time, non-intrusive activity status area at the bottom of the message list (or inside the input area):
+On desktop with narrow available width:
 
-- **Human-Readable Action Indicators**: Display user-friendly labels instead of technical code function names.
-  - *Incorrect*: `running search_product_db({query: "shoes"})`
-  - *Correct*: `Searching product catalog for "shoes"...`
-- **Activity States**: Include states like: `Idle`, `Thinking`, `Generating`, `Running Tool`, `Waiting for Tool`, `Uploading`, `Transcribing`, `Consolidating Results`, `Error`.
-- **Smart Updates**: These indicators must be updated reactively without injecting junk rows into the permanent message history.
-- **Scroll Stability**: Showing/hiding the activity indicator must not itself trigger a scroll jump. Only auto-scroll under the same "near bottom" condition defined in §2B.
+Show the Agent as a Floating Action Button at the bottom-right when closed.
+
+```text
+┌──────────────────────────────┐
+│                              │
+│       Main Application       │
+│                              │
+│                         [AI] │
+└──────────────────────────────┘
+```
+
+The user can open or close the Chat View.
+
+When opened, show a floating Agent Window.
+
+The Agent Window should:
+
+* Remain above the main application.
+* Avoid covering critical application controls when possible.
+* Support resize.
+* Support close.
+* Preserve the current Session after closing.
 
 ---
 
-## 7. Dynamic Settings Panel
+# 10. Desktop Wide Layout
 
-Expose configuration parameters to help developers and power users adjust the Agent.
+On desktop with wide available width:
 
-- **Credentials & API Keys**: Keep keys secure. Never expose API keys in client-side code in production. Retrieve keys from a server-side configuration or proxy.
-- **Dynamic Capabilities**: Query the backend/provider dynamically to list available models, max tokens, temperature limits, and active tools. Update settings controls instantly when the model or provider switches.
-- **Local Control**: Provide clear buttons to `Clear Current Session`, `Clear All Sessions`, and `Reset Local Agent Settings`.
+When Chat View is open, display it as a full-height right-side panel.
+
+```text
+┌───────────────────────────────┬──────────────┐
+│                               │              │
+│                               │    Agent     │
+│       Main Application        │    Chat      │
+│                               │    View      │
+│                               │              │
+└───────────────────────────────┴──────────────┘
+```
+
+Requirements:
+
+* Agent Panel is on the right-hand side.
+* Agent Panel uses full available height.
+* Main application uses the remaining width.
+* Main application content must not be hidden underneath the Agent.
+* The Agent Panel remains closable.
+* Closing the Agent returns it to the compact/FAB state.
+* Resizing may allow switching between floating and docked presentation.
 
 ---
 
-## 8. Capability Detection & Provider Adapters
+# 11. Mobile Layout
 
-Do not hardcode checks like `if (provider === 'gemini')`. Implement a **Provider Adapter Interface** that exposes uniform capabilities:
+When closed:
+
+```text
+┌──────────────────┐
+│                  │
+│ Main Application │
+│                  │
+│             [AI] │
+└──────────────────┘
+```
+
+Show the Agent FAB at the bottom-right.
+
+When opened:
+
+```text
+┌──────────────────┐
+│ Agent Toolbar    │
+├──────────────────┤
+│                  │
+│                  │
+│   Chat Messages  │
+│                  │
+│                  │
+├──────────────────┤
+│ Chat Input       │
+└──────────────────┘
+```
+
+Use full-screen or near-full-screen Chat View.
+
+Handle:
+
+* Safe-area inset
+* Mobile keyboard
+* Touch targets
+* Camera permission
+* Microphone permission
+* Back navigation
+* Close behavior
+
+---
+
+# 12. Chat View Layout
+
+The Chat View contains:
+
+```text
+┌──────────────────────────────────────┐
+│              Top Toolbar             │
+├──────────────────────────────────────┤
+│                                      │
+│             Chat Messages            │
+│                                      │
+│                                      │
+│           Agent Activity             │
+├──────────────────────────────────────┤
+│ [+]       ___input___    [MIC][SEND] │
+└──────────────────────────────────────┘
+```
+
+The general layout and control placement should remain recognizable across desktop and mobile.
+
+---
+
+# 13. Top Toolbar
+
+The Top Toolbar must provide:
+
+```text
+[New Chat] [History] [Settings] [Resize] [Close]
+```
+
+Required actions:
+
+* New Chat
+* Chat History / Session History
+* Settings
+* Resize / Dock
+* Close
+
+If horizontal space becomes crowded, lower-priority actions should move into an overflow/drop-down menu.
+
+Example:
+
+```text
+[New Chat]                  [⋮] [X]
+
+[⋮]
+ ├─ History
+ ├─ Settings
+ └─ Resize
+```
+
+Do not remove functionality merely because space is limited.
+
+---
+
+# 14. Bottom Toolbar
+
+The bottom toolbar must use this conceptual structure:
+
+```text
+[+]       ___input___       [MIC][SEND]
+```
+
+Do not replace this interaction model with unrelated layouts unless required by the host application's accessibility or platform constraints.
+
+---
+
+# 15. `[+]` Attachment Button
+
+`[+]` handles file / photo import.
+
+When clicked, possible actions include:
+
+```text
+[+]
+ ├─ Upload File
+ ├─ Upload Photo
+ └─ Take Photo
+```
+
+Requirements:
+
+* Support multiple files at once.
+* Support multiple images at once.
+* When more than one import flow exists, show a dropdown / popover / action menu.
+* Hide unsupported import flows.
+* Show selected attachments before send.
+* Allow individual attachment removal.
+
+---
+
+# 16. `[MIC]` Button
+
+`[MIC]` starts speech-to-text recording.
+
+Behavior:
+
+```text
+[MIC]
+  ↓
+Recording
+  ↓
+[STOP]
+  ↓
+Transcribing...
+  ↓
+Insert Text into Input
+```
+
+The recording must not automatically stop.
+
+The user controls when recording ends.
+
+The transcription result must return to:
+
+```text
+___input___
+```
+
+so the user can correct mistakes before pressing `[SEND]`.
+
+---
+
+# 17. `[SEND]` Button
+
+`[SEND]` sends the current message.
+
+The message may include:
+
+* Text
+* Files
+* Images
+* Any combination supported by the provider/model
+
+Disable `[SEND]` when there is no valid content to send.
+
+Show sending/loading state after submission.
+
+---
+
+# 18. Agent Loading and Activity State
+
+The Chat View must contain a persistent Agent Activity area near the end of the conversation.
+
+It must dynamically describe what the Agent is currently doing.
+
+Minimum states:
+
+```text
+Idle
+Thinking
+Running Tool
+Long Task
+Live Voice
+```
+
+Additional states may include:
+
+```text
+Uploading
+Transcribing
+Generating
+Planning
+Waiting for Tool
+Consolidating
+Error
+```
+
+Example display:
+
+```text
+◌ Thinking... 8s
+
+⚙ Running tool: Search products... 3s
+
+◌ Running task 2/5:
+  Compare available options... 18s
+```
+
+When busy:
+
+* Show elapsed seconds.
+* Update elapsed time continuously.
+* Show current processing stage.
+* Show the human-readable Tool / Task name when available.
+
+When idle:
+
+* Keep the activity indicator visible in a subdued state.
+
+Do not create permanent chat messages for every temporary activity-state update.
+
+If the user is near the bottom, activity changes may auto-scroll into view.
+
+If the user is reading older messages, do not force-scroll.
+
+---
+
+# 19. Session Management
+
+The Agent must support Session Management.
+
+Required functions:
+
+```text
+New Session
+Save Current Session
+Session History
+Switch Session
+Delete Session
+Rename Session
+```
+
+Each Session should support:
+
+* Automatically generated title
+* Manual rename
+* Creation time
+* Last updated time
+* Conversation history
+* Attachment metadata when required
+* Relevant Agent context metadata when required
+
+Example Session History:
+
+```text
+Chat History
+
+Today
+────────────────────────
+Product inventory question
+10:42
+
+Generate monthly report
+09:18
+
+Yesterday
+────────────────────────
+Customer service analysis
+16:20
+```
+
+Opening a Session restores its conversation.
+
+Closing and reopening the Agent must preserve the current Session.
+
+Starting `[New Chat]` creates a new Session.
+
+Session persistence may use the application's existing storage architecture.
+
+Possible storage includes:
+
+* localStorage
+* IndexedDB
+* Server-side database
+* Existing application persistence layer
+
+Do not force a different persistence architecture when the host application already provides one.
+
+---
+
+# 20. Long Task Support
+
+The Agent must support long or complex tasks that should not be handled as one oversized response.
+
+Examples:
+
+* Large research tasks
+* Multi-source research
+* Large data processing
+* Long report generation
+* Tasks with many Tool calls
+* Multi-step application operations
+* Tasks expected to exceed a practical single-response context/output size
+
+The Agent should be able to divide the request into ordered subtasks.
+
+The decision to split a task should be made by the Agent/model based on complexity and scope.
+
+Do not use frontend keyword matching to decide whether something is a long task.
+
+Simple questions must not be unnecessarily converted into task plans.
+
+---
+
+# 21. Long Task Planning
+
+Provide an internal long-task planning mechanism, such as:
+
+```text
+planLongTasks
+```
+
+The implementation name may differ when required by the Agent framework, but the capability must exist.
+
+A task plan contains:
+
+```text
+Objective
+Task 1
+Task 2
+Task 3
+...
+```
+
+A reasonable default maximum is approximately 10 subtasks unless the application requires otherwise.
+
+Each subtask should be independently bounded.
+
+Each task execution should receive:
+
+* Overall objective
+* Current subtask
+* Necessary previous task results
+* Required runtime context
+* Available Tools
+
+Avoid repeatedly sending unnecessary complete chat history into every subtask.
+
+---
+
+# 22. Long Task Execution
+
+Long tasks execute sequentially or according to valid dependencies.
+
+Each subtask may use:
+
+* Application Tools
+* Function Calling
+* Provider built-in tools
+* Web Search
+* Retrieval / RAG
+* Other Agent capabilities
+
+A failed subtask must not automatically terminate unrelated remaining tasks.
+
+Instead:
+
+```text
+Task 1  ✓
+Task 2  ✓
+Task 3  ✕
+Task 4  ✓
+```
+
+Continue when possible.
+
+When all tasks finish:
+
+1. Consolidate successful results.
+2. Clearly identify failed or incomplete tasks.
+3. Produce a final response.
+4. Add the final response to the Chat View.
+
+---
+
+# 23. Task Management Panel
+
+When a long task exists, the Chat View must display a Task Management Panel.
+
+Example:
+
+```text
+┌──────────────────────────────────┐
+│ Research competitor products     │
+│ Running              2 / 5       │
+│ ████████░░░░░░░░ 40%             │
+├──────────────────────────────────┤
+│ ✓ Search available products      │
+│ ✓ Collect pricing                │
+│ ◌ Compare specifications         │
+│ ○ Analyze differences            │
+│ ○ Generate final report          │
+└──────────────────────────────────┘
+```
+
+Required overall states:
+
+```text
+Running
+Consolidating
+Completed
+Partially Failed
+```
+
+Each task must display a state:
+
+```text
+Pending
+Running
+Done
+Failed
+```
+
+Suggested visual mapping:
+
+```text
+○ Pending
+◌ Running
+✓ Done
+✕ Failed
+```
+
+Completed tasks should include a short result summary when useful.
+
+---
+
+# 24. Task Panel Collapse / Expand
+
+The Task Management Panel must support:
+
+```text
+[Collapse]
+[Expand]
+```
+
+Expanded state:
+
+```text
+Research competitor products
+Running 2 / 5
+████████░░░░░░ 40%
+
+✓ Search products
+✓ Collect prices
+◌ Compare products
+○ Analyze differences
+○ Generate report
+```
+
+Collapsed state:
+
+```text
+Research competitor products
+Running 2 / 5
+████████░░░░░░ 40%
+```
+
+Even when collapsed, preserve:
+
+* Status
+* Completed / Total count
+* Progress bar
+
+After completion, retain the Task Panel for review.
+
+It may be cleared when the next independent user request or task plan begins.
+
+---
+
+# 25. Quick Reply and Follow-up Actions
+
+The Agent can attach contextual follow-up actions to its responses.
+
+Examples:
+
+```text
+[Continue]
+[Retry]
+[View Result]
+[Open Page]
+[Apply Changes]
+[Generate Report]
+```
+
+Follow-up actions should be generated from:
+
+* Tool results
+* Application context
+* Structured Agent output
+* Explicit UI configuration
+
+Buttons must not promise actions that are unavailable.
+
+---
+
+# 26. Chat View Setup
+
+The Agent must provide a Settings panel.
+
+The required conceptual setup layout is:
+
+```text
+API KEY
+[____________________________] [Save]
+
+Model
+[Model Drop Down List        ] [Refresh]
+
+Other Model
+[Other Model Drop Down List  ]
+
+Other Model Settings
+[...]
+
+System Prompt
+[                              ]
+[                              ]
+[                              ]
+
+Built-in Tools
+[✓] Web / Google Search
+[ ] Code Execution
+[ ] Other Provider Tool
+```
+
+These explicit actions must not be abstracted away.
+
+---
+
+# 27. API KEY `[Save]`
+
+The API Key field must have an explicit `[Save]` button.
+
+```text
+API KEY
+[____________________________] [Save]
+```
+
+Required flow:
+
+```text
+Enter API Key
+      ↓
+    [Save]
+      ↓
+Checking availability...
+      ↓
+ ┌───────────────┐
+ │ Valid         │
+ │ Invalid       │
+ └───────────────┘
+```
+
+When `[Save]` is clicked:
+
+1. Enter loading state.
+2. Validate the API Key / authentication against the selected provider.
+3. Confirm that the provider API is reachable.
+4. Display success or failure.
+5. Save the configuration only when the validation succeeds.
+6. Preserve the previous valid configuration if the new key fails validation.
+
+Possible UI states:
+
+```text
+API KEY
+[****************************] [Save]
+✓ Connected
+```
+
+or
+
+```text
+API KEY
+[____________________________] [Save]
+✕ Invalid API Key
+```
+
+Do not silently save API Key changes on:
+
+* Blur
+* Field change
+* Settings panel close
+
+The explicit `[Save]` action is required.
+
+Saved secrets must not be displayed in full.
+
+Production credential storage must follow the security model of the host application.
+
+---
+
+# 28. Model Drop Down List `[Refresh]`
+
+The primary model selector must have an explicit `[Refresh]` button.
+
+```text
+Model
+[Model Drop Down List ▼] [Refresh]
+```
+
+The model list should be dynamically loaded from the provider whenever the API supports model discovery.
+
+Do not rely only on hard-coded model names.
+
+Required behavior:
+
+### Manual Refresh
+
+Click:
+
+```text
+[Refresh]
+```
+
+to retrieve the latest model list.
+
+During refresh:
+
+```text
+Model
+[Loading models...      ] [Refresh]
+```
+
+### API Key Changed
+
+After a new API Key is successfully saved:
+
+```text
+API Key Changed
+      ↓
+Validate API Key
+      ↓
+Validation Success
+      ↓
+Automatically Refresh Model List
+```
+
+Automatic refresh does not remove the manual `[Refresh]` button.
+
+### Model Preservation
+
+After refresh:
+
+* Keep the current model selected if it is still available.
+* If the model is no longer available, select or request a valid replacement.
+* Clearly show model-list loading errors.
+
+---
+
+# 29. Other Model Drop Down Lists
+
+Support additional model selectors when different Agent capabilities require different models.
+
+Examples:
+
+```text
+Chat Model
+[Model ▼] [Refresh]
+
+Speech-to-Text Model
+[Model ▼]
+
+Realtime Voice Model
+[Model ▼]
+
+Embedding Model
+[Model ▼]
+
+Vision Model
+[Model ▼]
+```
+
+Only show additional model selectors that are relevant to the current provider and enabled capabilities.
+
+Do not create unnecessary selectors when one model handles all required capabilities.
+
+When authentication changes, dependent model lists should refresh as required.
+
+---
+
+# 30. Other Model Settings
+
+Provide model settings supported by the selected model/provider.
+
+Possible settings include:
+
+```text
+Temperature
+Maximum Output Tokens
+Reasoning Level
+Top P
+Streaming
+Structured Output
+Voice
+Response Modality
+Other Provider-Specific Settings
+```
+
+Only display settings that are actually supported.
+
+Model settings should update when the selected model changes.
+
+---
+
+# 31. System Prompt
+
+Provide an editable System Prompt field.
+
+```text
+System Prompt
+
+┌──────────────────────────────────┐
+│                                  │
+│                                  │
+│                                  │
+└──────────────────────────────────┘
+```
+
+System Prompt configuration should remain separate from automatically injected runtime application context.
+
+The implementation may compose:
+
+```text
+Base Agent Instructions
++
+User-configurable System Prompt
++
+Runtime Application Context
+```
+
+The user should not need to manually copy current application state into the System Prompt.
+
+---
+
+# 32. Built-in Provider Tools
+
+Allow supported provider-native tools to be enabled or disabled.
+
+Example:
+
+```text
+Built-in Tools
+
+[✓] Google Search
+[ ] Code Execution
+[ ] File Search
+[ ] URL Context
+```
+
+For Gemini, this may include:
+
+```text
+Google Search
+Code Execution
+URL Context
+```
+
+For other providers, display equivalent provider-native capabilities.
+
+The list must be capability-driven.
+
+Do not display unsupported provider tools.
+
+Provider-native tools and application-defined Custom Tools / Function Calls are separate concepts.
+
+---
+
+# 33. Settings Dependency Flow
+
+Settings should update dependent capabilities automatically.
+
+```text
+API KEY
+  ↓
+[Save]
+  ↓
+Validate
+  ↓
+Connected
+  ↓
+Refresh Models
+  ↓
+Select Model
+  ↓
+Detect Model Capabilities
+  ↓
+Refresh:
+- Other Models
+- Model Settings
+- Built-in Tools
+- File Support
+- Image Support
+- Speech Support
+- Other Agent Capabilities
+```
+
+The Agent UI should therefore react to authentication and model changes instead of treating settings as unrelated static fields.
+
+---
+
+# 34. Capability Detection
+
+Agent controls must reflect actual provider/model/browser capabilities.
+
+Possible capabilities include:
+
+* Text
+* Streaming
+* File Input
+* Image Input
+* Camera Input
+* Speech-to-Text
+* Realtime Voice
+* Tool Use
+* Function Calling
+* Web Search
+* File Search
+* Retrieval
+* Code Execution
+* Structured Output
+* Other provider-native capabilities
 
 ```typescript
 interface ModelCapabilities {
@@ -243,86 +1240,362 @@ interface ProviderAdapter {
 }
 ```
 
-- **Responsive Controls**: If `supportsImageInput` is `false`, disable or hide the photo upload button inside the composer and show a tooltip explanation.
-- **Graceful Degradation**: Always fall back to text-only prompts if advanced features are unsupported.
+When unsupported:
+
+* Hide the feature if irrelevant.
+* Disable it with an explanation if the user should know it exists.
+* Provide fallback behavior where practical.
 
 ---
 
-## 9. Application Context Integration
+# 35. Tool / Function Calling Integration
 
-The Agent must receive relevant runtime context from the active application to provide contextually accurate responses without asking the user repetitive questions.
+During development, inspect the existing application and identify functions that should be exposed to the Agent as Tools / Function Calls.
 
-- **Dynamic Context Injection**:
-  - **Route & Page State**: Pass the current route/URL path, open page title, and active page params.
-  - **Selected Records**: Pass key details of the selected item (e.g., active task, user profile, selected product ID).
-  - **Active Filters & Search Query**: Expose what filters/sorts are currently applied to the screen grid or view.
-  - **User State**: Include the current user's role, permissions, and relevant configuration preferences.
-- **Privacy & Minimization Rules**:
-  - Only supply context that is directly useful for the Agent's tasks.
-  - **Do not expose raw API keys, passwords, or highly confidential user details** (like full payment card credentials) in the context window.
-  - Do not bloat the prompt with large datasets if they are not relevant to the current conversation focus.
+The Agent is expected to do more than answer questions when the application has useful executable capabilities.
 
----
+Recommend or implement a Tool when the Agent needs to:
 
-## 10. Tool Use & Function Calling Security
-
-When analyzing the host application, map out existing APIs and actions that the Agent can invoke.
-
-### A. Tool Design Guidelines
-
-- **Naming**: Use verbs starting with camelCase: `searchProducts`, `getOrderDetails`, `createTask`, `updateInvoiceStatus`, `navigateToPage`.
-- **Description**: Provide clear, descriptive docstrings detailing exactly what the tool does and when the model should trigger it.
-- **Simulations Prohibited**: The Agent must never hallucinate tool outcomes. If a tool fails, return a structured error response:
-  ```json
-  {
-    "functionResponse": {
-      "name": "updateInvoiceStatus",
-      "response": {
-        "error": "Failed to update status. User lacks 'finance_admin' permission."
-      }
-    }
-  }
-  ```
-- **Real-Time State Mirroring**: Executed tool outputs should immediately update the host application state (e.g., refreshing a datagrid or showing a success toast on the page) so that the user's screen reflects the action.
-
-### B. Destructive & Critical Confirmation Flow
-
-Any tool that initiates irreversible, expensive, or destructive actions must prompt the user for confirmation via an interactive UI card before calling the backend.
-
-- **Actions requiring confirmation**: Deleting records, triggering payments/emails, batch edits, modifying credentials.
-- **Flow**:
-  1. Agent decides to call `deleteInvoice(id)`.
-  2. UI interceptor pauses the tool call and renders a confirm bubble: *"The assistant wants to delete Invoice #1024. Confirm? [Yes] [No]"*.
-  3. If user clicks *Yes*, execute the tool and report success.
-  4. If user clicks *No*, return a cancelled status to the model: `{"error": "User rejected tool execution"}`.
+* Read application data
+* Search application records
+* Retrieve current application state
+* Create data
+* Update data
+* Delete data
+* Generate reports
+* Save generated results
+* Navigate to a specific application state
+* Execute an existing application action
+* Coordinate several application operations
+* Perform a multi-step workflow
+* Run RAG or internal search
+* Trigger external services through the application
 
 ---
 
-## 11. State Separation & Code Organization
+# 36. Do Not Replace Simple UI with Chat
 
-Keep code modular. Follow this separation of concerns:
+Do not convert every existing application feature into Agent interaction.
 
-| Layer                         | Responsibility                                                                                           |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **Components**          | Visual message list, bubbles, headers, composers, FAB, settings UI.                                      |
-| **Hooks / Controllers** | Handles IME listeners, composer heights, state mappings, file selection handlers, audio stream triggers. |
-| **Provider Adapters**   | Concrete implementations for Gemini API, OpenAI, Anthropic, mapping inputs/outputs to standard schemas.  |
-| **Tool registry**       | Registers available functions, validates inputs, and triggers host actions.                              |
-| **Repository Layer**    | Saves, loads, and syncs history and user settings.                                                       |
+Prefer existing traditional UI for operations that are:
+
+* Simple
+* Predictable
+* High frequency
+* Easier with a button
+* Easier with a form
+* Easier with a menu
+* Easier with direct manipulation
+
+Prefer Agent / Tool interaction for operations involving:
+
+* Natural-language intent
+* Ambiguous requests
+* Cross-feature workflows
+* Multi-step work
+* Data aggregation
+* Context-dependent operations
+* Complex search
+* Repetitive administrative workflows
+
+The Agent complements the existing application UI.
+
+It does not replace the application's primary interaction model.
 
 ---
 
-## 12. Integration Verification Checklist
+# 37. Tool Definition
 
-When verifying a newly added AI Agent UI, check:
+Each application Tool should define:
 
-- [ ] **Aesthetics & Layout**: Does it match the host application's typography, color scheme, and spacing?
-- [ ] **Docking & Reflow**: Does the desktop wide dock reflow the application page rather than overlaying it?
-- [ ] **FAB & Mobile Screen**: Does the FAB work on mobile and stretch to near full-screen with safe-area support?
-- [ ] **Composer IME**: Does pressing Enter while typing in an IME (e.g. Traditional Chinese input) correctly complete the composition rather than sending the message?
-- [ ] **Multi-attachments**: Can users preview, remove individual items, and send multiple files together?
-- [ ] **Speech-to-Text**: Does the mic button record until stopped, display elapsed time, and paste editable text into the input field?
-- [ ] **Long Task Plan**: Does a multi-tool execution plan display a task management card with a progress bar and state lists?
-- [ ] **Tool Realism**: Does tool success trigger actual updates in the application UI?
-- [ ] **Confirm Dialog**: Do destructive actions request user confirmation before hitting the API?
-- [ ] **API Security**: Are keys kept out of the client codebase for production deployment?
+```text
+name
+description
+parameters / input schema
+return type / output schema
+handler
+error handling
+```
+
+Recommended additional metadata:
+
+```text
+user-facing label
+activity label
+permission requirement
+confirmation requirement
+```
+
+Tool names should normally use verbs.
+
+Examples:
+
+```text
+searchProducts
+getProductDetails
+createReport
+updateTask
+deleteItem
+navigateToRecord
+saveDocument
+```
+
+---
+
+# 38. Tool Execution UI
+
+When an Agent invokes a Tool, Agent Activity must reflect the operation.
+
+Example:
+
+```text
+⚙ Searching inventory...
+```
+
+instead of exposing only:
+
+```text
+running searchProducts()
+```
+
+Use a human-readable activity label.
+
+If multiple Tool rounds occur, the UI should continue updating the same Agent Activity area rather than generating excessive system messages.
+
+---
+
+# 39. Tool Execution Integrity
+
+The Agent must not claim an application operation succeeded unless the real Tool handler returned success.
+
+Required flow:
+
+```text
+Agent decides to execute action
+        ↓
+Call Tool
+        ↓
+Application handler executes
+        ↓
+Tool returns result
+        ↓
+Application state updates
+        ↓
+Agent reports confirmed result
+```
+
+For state-changing operations, the actual application state is the source of truth.
+
+Do not simulate success through Agent text.
+
+---
+
+# 40. Application Context
+
+Provide relevant current application context to the Agent when needed.
+
+Possible context includes:
+
+* Current route
+* Current page
+* Current selected item
+* Current filters
+* Current form state
+* Visible records
+* Current user permissions
+* Available actions
+* Relevant business state
+
+Do not send irrelevant application data merely because it exists.
+
+---
+
+# 41. Architecture Separation
+
+Keep the Agent UI reusable.
+
+Recommended responsibility separation:
+
+```text
+Agent Components
+    ↓
+Agent UI / interaction
+
+Agent State
+    ↓
+Chat / Session / Task / Activity state
+
+Agent Provider Service
+    ↓
+Model API communication
+
+Tool Service
+    ↓
+Function registration and execution
+
+Repository / Persistence
+    ↓
+Session and settings persistence
+
+Provider Adapter
+    ↓
+Provider-specific capability mapping
+```
+
+| Layer | Responsibility |
+| --- | --- |
+| **Agent Components** | visual presentation (visual message list, bubbles, headers, composers, FAB, settings UI) |
+| **Agent State** | interaction behavior (handles IME listeners, composer heights, state mappings, file selection handlers) |
+| **Agent Provider Service** | model and API communication |
+| **Tool Service** | Tool registration and execution |
+| **Repository / Persistence** | session and settings persistence |
+| **Provider Adapter** | provider-specific capability mapping |
+
+Reuse the host application's existing:
+
+* Component system
+* State management
+* Styling
+* Routing
+* Persistence
+* API architecture
+
+Do not introduce a new application framework solely to support the Agent.
+
+---
+
+# 42. Minimum Acceptance Criteria
+
+The Agent UI is complete only when all applicable requirements below pass.
+
+## Chat UI
+
+* Chat View can open and close.
+* Desktop narrow layout supports bottom-right FAB.
+* Desktop wide layout supports full-height right-side panel.
+* Mobile open state supports full-screen / near-full-screen Chat View.
+* Message Bubble layout works.
+* Markdown renders correctly.
+* Quick Reply works.
+* Agent Loading state is visible.
+* Agent Activity is visible.
+
+## Input
+
+* `[+] ___input___ [MIC][SEND]` interaction is preserved.
+* Text Input supports multiline.
+* Enter sends.
+* Shift + Enter creates newline.
+* IME composition does not accidentally send.
+* Multiple files can be selected.
+* Multiple attachments can be removed individually.
+* Photos can be uploaded.
+* Camera capture works when supported.
+
+## Speech-to-Text
+
+* `[MIC]` starts recording.
+* Recording does not automatically stop.
+* User manually stops recording.
+* Transcription loading is shown.
+* Transcription returns to the editable Chat Input.
+* Transcription is not automatically sent.
+
+## Session
+
+* `[New Chat]` creates a new Session.
+* Session history can be opened.
+* Historical Sessions can be switched.
+* Session can be renamed.
+* Session can be deleted.
+* Session titles can be automatically generated.
+* Creation / update time is retained.
+* Closing the Agent preserves the current Session.
+
+## Long Tasks
+
+* Agent can determine when a request should become a long task.
+* Long tasks can be divided into subtasks.
+* Simple requests are not unnecessarily split.
+* Individual task failure does not automatically abort unrelated tasks.
+* Final results are consolidated after execution.
+
+## Task Management Panel
+
+* Overall status is visible.
+* `Completed / Total` is visible.
+* Progress bar is visible.
+* Pending / Running / Done / Failed states are visible.
+* Completed tasks may show summaries.
+* Panel supports collapse / expand.
+* Collapsed state still shows status, count, and progress.
+
+## Agent Activity
+
+* Idle state exists.
+* Thinking state exists.
+* Running Tool state exists.
+* Long Task state exists.
+* Busy states show elapsed time.
+* Tool / Task activity uses readable names.
+* Activity updates do not pollute permanent chat history.
+* Auto-scroll does not interrupt users reading older messages.
+
+## Settings
+
+The following explicit controls must exist:
+
+```text
+API KEY [Save]
+
+Model Drop Down List [Refresh]
+
+Other Model Drop Down Lists
+
+Other Model Settings
+
+System Prompt
+
+Enable / Disable Built-in Tools
+```
+
+* `[Save]` validates API availability before accepting a new API Key.
+* Invalid keys are not treated as saved valid credentials.
+* Successful API Key change automatically refreshes Model options.
+* `[Refresh]` manually refreshes the Model list.
+* Model list is dynamic when provider discovery exists.
+* Other model lists appear when required.
+* Model-specific settings reflect current capabilities.
+* System Prompt is editable.
+* Provider built-in tools can be configured when the provider exposes them.
+
+## Tools
+
+* Application functions suitable for Agent interaction are identified.
+* Relevant functions are exposed as Tools / Function Calls.
+* Tool execution uses actual application handlers.
+* Tool errors are displayed clearly.
+* Agent does not falsely claim Tool success.
+* Chat, long tasks, and other Agent interaction modes reuse the same Tool handlers whenever practical.
+
+---
+
+# 43. Core Design Principle
+
+The resulting experience should feel like:
+
+```text
+Existing Web Application
+        +
+Reusable AI Agent Assistance
+        +
+Application-aware Tools
+```
+
+not:
+
+```text
+Chatbot replacing the entire application
+```
+
+The Agent should be easy to discover, easy to open, easy to dismiss, aware of the application's current context, capable of operating the application through real Tools, and capable of clearly exposing its current state when work takes more than a normal conversational turn.
