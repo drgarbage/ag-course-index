@@ -21,9 +21,17 @@ new GoogleGenAI({}).models.list();
 const systemInstruction = `Current local time: ${new Date().toLocaleString()}`;
 ```
 
-### 3. API Key validation
+### 3. API Key validation (verify by listing models via SDK)
 ```javascript
-if (!apiKey.startsWith("AIzaSy")) return false;
+async function validateApiKey(apiKey) {
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    await ai.models.list();
+    return true;
+  } catch {
+    return false;
+  }
+}
 ```
 
 ---

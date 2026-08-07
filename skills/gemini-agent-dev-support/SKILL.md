@@ -44,7 +44,16 @@ new GoogleGenAI({}).models.list();
 const systemInstruction = `Current local time: ${new Date().toLocaleString()}`;
 ```
 ```javascript
-if (!apiKey.startsWith("AIzaSy")) return false;
+// API Key Validation (verify by listing models via SDK)
+async function validateApiKey(apiKey) {
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    await ai.models.list();
+    return true;
+  } catch {
+    return false;
+  }
+}
 ```
 
 ### C. Tool Combination (Gemini 2.x vs 3.x)
