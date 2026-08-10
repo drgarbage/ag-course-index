@@ -1,4 +1,4 @@
-﻿# Windows Course Toolchain Installer UI Module
+# Windows Course Toolchain Installer UI Module
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -293,14 +293,7 @@ function Install-AllTools {
     if (Get-Command 'npx' -ErrorAction SilentlyContinue) {
         Write-Host "`n▶ 安裝 Google 官方 Gemini Skills..." -ForegroundColor Cyan
         try {
-            # Local
-            & npx skills add google-gemini/gemini-skills --skill gemini-api-dev
-            & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev
-            & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api
-            # Global
-            & npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
-            & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
-            & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
+            & npx skills add google-gemini/gemini-skills --skill gemini-api-dev gemini-live-api-dev gemini-interactions-api --global --agent claude-code antigravity gemini-cli -y
             Write-Host "  ✓ Gemini Skills 安裝完成。" -ForegroundColor Green
         } catch {
             Write-Warning "Gemini Skills 安裝失敗：$($_.Exception.Message)"
@@ -432,41 +425,7 @@ function Install-Custom {
                 Write-Host "`n▶ 安裝 Google 官方 Gemini Skills..." -ForegroundColor Cyan
                 if (Get-Command 'npx' -ErrorAction SilentlyContinue) {
                     try {
-                        # Local
-                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev
-                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev
-                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api
-                        # Global
-                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
-                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
-                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
-                        Write-Host "  ✓ Gemini Skills 安裝完成。" -ForegroundColor Green
-                    } catch {
-                        Write-Warning "Gemini Skills 安裝失敗：$($_.Exception.Message)"
-                    }
-                }
-            }
-            "9" {
-                Write-Host "`n▶ 檢查並安裝 uv..." -ForegroundColor Cyan
-                try {
-                    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-                    Write-Host "  ✓ uv 安裝/更新完成。" -ForegroundColor Green
-                } catch {
-                    Write-Warning "uv 安裝失敗：$($_.Exception.Message)"
-                }
-                Write-Host "`n▶ 設定 Gemini API Docs MCP..." -ForegroundColor Cyan
-                Set-McpServerConfig
-                Write-Host "`n▶ 安裝 Google 官方 Gemini Skills..." -ForegroundColor Cyan
-                if (Get-Command 'npx' -ErrorAction SilentlyContinue) {
-                    try {
-                        # Local
-                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev
-                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev
-                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api
-                        # Global
-                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
-                        & npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
-                        & npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
+                        & npx skills add google-gemini/gemini-skills --skill gemini-api-dev gemini-live-api-dev gemini-interactions-api --global --agent claude-code antigravity gemini-cli -y
                         Write-Host "  ✓ Gemini Skills 安裝完成。" -ForegroundColor Green
                     } catch {
                         Write-Warning "Gemini Skills 安裝失敗：$($_.Exception.Message)"

@@ -254,9 +254,7 @@ install_all_tools() {
   
   if command -v npx >/dev/null 2>&1; then
     printf '\n\033[36m▶ 安裝 Google 官方 Gemini Skills...\033[0m\n'
-    npx skills add google-gemini/gemini-skills --skill gemini-api-dev --global
-    npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev --global
-    npx skills add google-gemini/gemini-skills --skill gemini-interactions-api --global
+    npx skills add google-gemini/gemini-skills --skill gemini-api-dev gemini-live-api-dev gemini-interactions-api --global --agent claude-code antigravity gemini-cli -y
     printf '  \033[32m✓ Gemini Skills 安裝完成。\033[0m\n'
   fi
   
