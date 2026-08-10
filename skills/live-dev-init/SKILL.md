@@ -15,7 +15,7 @@ This skill initializes the development environment and performs preflight checks
 | --- | --- | --- |
 | git, gh | `command -v git`, `command -v gh`, `gh auth status` | run `scripts/install-git-gh-macos.command` \| `scripts/install-git-gh-windows.ps1`. Never improvise install steps. |
 | node | `node --version` ≥ `scripts/toolchain/catalog.json:node_lts_major` | `scripts/course-toolchain-macos.command base` \| `scripts/course-toolchain-windows.ps1 -Profile base` |
-| vercel, firebase | `npx vercel whoami`, `npx firebase login:list` | `npm install -D vercel firebase-tools` (never `-g`: EACCES). Login must pass before setting up config or deploying. |
+| vercel, firebase | `npx vercel whoami`, `npx firebase login:list` | `npm install -D vercel@latest firebase-tools` (never `-g`: EACCES). Login must pass before setting up config or deploying. |
 | gitleaks | `command -v gitleaks` | install per table below, re-probe, never skip the scan gate |
 
 | OS | Install | Fallback |
