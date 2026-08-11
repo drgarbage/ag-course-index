@@ -77,6 +77,12 @@ google-gemini/gemini-skills --skill gemini-live-api-dev
 google-gemini/gemini-skills --skill gemini-interactions-api
 ```
 
+或用指令
+
+```
+npx skills add google-gemini/gemini-skills --skill gemini-api-dev --skill gemini-live-api-dev --skill gemini-interactions-api -a claude-code -a antigravity -a gemini-cli -g -y
+```
+
 ### 課程相關
 
 | 技能名稱                                                      | 說明描述             |
