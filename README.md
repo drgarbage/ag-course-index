@@ -83,6 +83,12 @@ google-gemini/gemini-skills --skill gemini-interactions-api
 npx skills add google-gemini/gemini-skills --skill gemini-api-dev --skill gemini-live-api-dev --skill gemini-interactions-api -a claude-code -a antigravity -a gemini-cli -g -y
 ```
 
+### Spec Skills
+
+```bash
+npx skills@latest add mattpocock/skills
+```
+
 ### 課程相關
 
 | 技能名稱                                                      | 說明描述             |
