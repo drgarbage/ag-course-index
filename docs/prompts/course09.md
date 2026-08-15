@@ -2,6 +2,30 @@
 
 來源：`class09/slides/slide.md`。
 
+## 🛠️ 開發環境 Skill 安裝指引
+
+本單元實作建議安裝以下 Agent Skills，以協助 AI 自動化開發與防止常見 SDK 錯誤：
+
+* **gemini-agent-dev-support**: 防止常見 Gemini API 調用與金鑰洩漏錯誤
+* **ai-agent-ui-support**: 規範 Agent 聊天介面
+* **live-dev-init**: 預檢與環境初始化
+* **live-dev-storage-init**: Firebase與Firestore資料庫配置 (若需要Firestore)
+* **live-dev-config**: GitHub與Vercel專案配置與憑證安全收集
+* **live-dev-deploy**: 本機自動測試、自癒與 Git Flow 部署發行
+
+在你的專案根目錄下，開啟終端機並執行以下指令完成安裝：
+
+```bash
+# 專案本地安裝 (推薦)
+npx skills add drgarbage/ag-course-index --skill gemini-agent-dev-support
+npx skills add drgarbage/ag-course-index --skill ai-agent-ui-support
+npx skills add drgarbage/ag-course-index --skill live-dev-init
+npx skills add drgarbage/ag-course-index --skill live-dev-storage-init
+npx skills add drgarbage/ag-course-index --skill live-dev-config
+npx skills add drgarbage/ag-course-index --skill live-dev-deploy
+npx skills add affaan-m/ECC --skill frontend-design-direction
+```
+
 ## 提案企劃顧問 System Prompt
 
 ```text
@@ -40,6 +64,24 @@
 - 遵循 git flow，此階段在 feature/stage1-core 分支開發
 - 建立並持續維護 SPEC.md
 - 未設定 API Key 時要有友善提示
+
+## 軟體介面
+整體採用 RWD 設計，包括 Navigation Bar, Side Menu, Main View, Chat View (right)。
+當使用手機檢視時，以 Main View 為主，其他介面透過選單或FAB做切換開關。
+使用白色介面設計，舒適乾淨，紙張陰影風格。在企劃書呈現區域，模擬紙張效果，紙張背後採用深灰色背景區分。
+支援全螢幕檢視，採用全螢幕檢視時，以企劃書內容為主體滿版呈現，在桌面呈現時，仍以占滿完整寬度的形式呈現企劃書，以利作簡報或審查之用。
+
+### Dashboard View
+顯示近期企劃書列表，以文件卡片的形式呈現，並提供建立新企劃書的按鈕。
+
+### Proposal Manager View
+列表所有已經儲存的企劃書，可以搜尋、列表、更名、刪除、開啟企劃書。
+
+### Proposal View / Editor
+企劃書檢視畫面，提供不同版本的顯示切換介面，企劃書預覽模式，全螢幕預覽，以及編輯模式，在編輯模式下，使用者可以選取框選區塊，輸入提示詞要求 AI 局部修改。
+
+### Chat View
+與Agent對話介面，放置於右下角，可收闔。
 ```
 
 ## 階段二：Main View
