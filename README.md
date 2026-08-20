@@ -35,8 +35,7 @@
 * [ag-course-web-agent-base](https://github.com/drgarbage/ag-course-web-agent-base) : 空白的 Web Agent 基底
 * [ag-course-line-chatbot-base](https://github.com/drgarbage/ag-course-line-chatbot-base) : 空白的 Line Agent 基底 ([LINE設定教學影片](https://youtu.be/-eqwH9rCN2M))
 * [ag-course-line-chatbot-assistant](https://github.com/drgarbage/ag-course-line-chatbot-assistant) : LINE 聊天機器人助理 ([Google Auth 設定教學影片](https://youtu.be/Q8TtqBNCibo))
-* ag-course-agent-app-hub : 可加載不同 App 的 Agent 基底
-* ag-course-web-report : 報表相關的通用基底
+* [ag-course-agent-app-hub](https://github.com/drgarbage/agent-app-hub) : 可加載不同 App 的 Agent 基底
 * [ag-course-copilot](https://github.com/drgarbage/ag-course-copilot) : 即時助理
 
 ## 下載連結
@@ -91,16 +90,16 @@ npx skills@latest add mattpocock/skills
 
 ### 課程相關
 
-| 技能名稱                                                      | 說明描述             |
-| :------------------------------------------------------------ | :------------------- |
-| [ai-agent-ui-support](./skills/ai-agent-ui-support/)           | 網頁 AI 助理        |
-| [live-dev-init](./skills/live-dev-init/)                       | 預檢與環境初始化     |
-| [live-dev-storage-init](./skills/live-dev-storage-init/)       | Firebase與Firestore資料庫配置 |
-| [live-dev-config](./skills/live-dev-config/)                   | GitHub與Vercel專案配置與憑證安全收集 |
+| 技能名稱                                                      | 說明描述                               |
+| :------------------------------------------------------------ | :------------------------------------- |
+| [ai-agent-ui-support](./skills/ai-agent-ui-support/)           | 網頁 AI 助理                          |
+| [live-dev-init](./skills/live-dev-init/)                       | 預檢與環境初始化                       |
+| [live-dev-storage-init](./skills/live-dev-storage-init/)       | Firebase與Firestore資料庫配置          |
+| [live-dev-config](./skills/live-dev-config/)                   | GitHub與Vercel專案配置與憑證安全收集   |
 | [live-dev-deploy](./skills/live-dev-deploy/)                   | 本機自動測試、自癒與 Git Flow 部署發行 |
 | [live-dev](./skills/live-dev/)                                 | (Legacy Orchestrator) 簡易網頁開發環境 |
-| [gemini-agent-dev-support](./skills/gemini-agent-dev-support/) | Gemini API 問題修正  |
-| [line-command-designer](./skills/line-command-designer/)       | LINE 選單與互動設計  |
-| [line-interact-planner](./skills/line-interact-planner/)       | LINE 對話 Token 優化 |
-| [line-memory](./skills/line-memory/)                           | LINE 對話記憶        |
-| [line-ui-designer](./skills/line-ui-designer/)                 | LINE 視覺呈現優化    |
+| [gemini-agent-dev-support](./skills/gemini-agent-dev-support/) | Gemini API 問題修正                    |
+| [line-command-designer](./skills/line-command-designer/)       | LINE 選單與互動設計                    |
+| [line-interact-planner](./skills/line-interact-planner/)       | LINE 對話 Token 優化                   |
+| [line-memory](./skills/line-memory/)                           | LINE 對話記憶                          |
+| [line-ui-designer](./skills/line-ui-designer/)                 | LINE 視覺呈現優化                      |
